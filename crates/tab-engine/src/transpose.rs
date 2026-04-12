@@ -111,4 +111,15 @@ mod tests {
         assert_eq!(pitch, 28);
         assert_eq!(shift, Some(1));
     }
+
+    #[test]
+    fn transpose_preserves_technique() {
+        use crate::midi::Technique;
+        let notes = vec![
+            MidiNote { pitch: 33, onset: 0.0, offset: 0.5, velocity: 80, technique: None },
+            MidiNote { pitch: 35, onset: 0.5, offset: 1.0, velocity: 80, technique: Some(Technique::Slide) },
+        ];
+        let sheet = transpose(&notes, 2, Tuning::Standard4, 120.0, (4, 4));
+        assert_eq!(sheet.notes[1].technique, Some(Technique::Slide));
+    }
 }
