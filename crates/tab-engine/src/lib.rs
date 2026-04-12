@@ -1,3 +1,4 @@
+pub mod export;
 pub mod midi;
 pub mod tab;
 pub mod transpose;
