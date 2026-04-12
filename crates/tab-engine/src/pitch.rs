@@ -381,13 +381,13 @@ impl YinDetector {
 // ── Onset segmentation helpers ───────────────────────────────────
 
 fn predominant_pitch(pitched: &[(u8, f64, f64)]) -> u8 {
-    let mut counts = std::collections::HashMap::new();
-    for &(p, _, _) in pitched {
-        *counts.entry(p).or_insert(0u32) += 1;
+    let mut weights = std::collections::HashMap::new();
+    for &(p, _, confidence) in pitched {
+        *weights.entry(p).or_insert(0.0_f64) += confidence;
     }
-    counts
+    weights
         .into_iter()
-        .max_by_key(|&(_, count)| count)
+        .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
         .map(|(p, _)| p)
         .unwrap_or(pitched[0].0)
 }
@@ -668,6 +668,21 @@ mod tests {
             Some(Technique::Slide),
             "second note should be detected as slide"
         );
+    }
+
+    #[test]
+    fn confidence_weighted_pitch_prefers_confident_frames() {
+        // 3 frames say pitch 45 with low confidence, 2 frames say pitch 46 with high confidence
+        // Confidence-weighted should prefer 46
+        let pitched = vec![
+            (45_u8, 0.1_f64, 0.2_f64), // low confidence
+            (45, 0.1, 0.2),
+            (45, 0.1, 0.2),
+            (46, 0.1, 0.9), // high confidence
+            (46, 0.1, 0.9),
+        ];
+        let result = predominant_pitch(&pitched);
+        assert_eq!(result, 46, "should prefer the higher-confidence pitch");
     }
 
     #[test]
