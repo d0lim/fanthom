@@ -10,6 +10,8 @@ export type NoteOrigin =
   | "Optimized"
   | { OctaveShifted: number };
 
+export type Technique = "Slide";
+
 export interface TabNote {
   string: number;
   fret: number;
@@ -17,6 +19,7 @@ export interface TabNote {
   onset: number;
   duration: number;
   origin: NoteOrigin;
+  technique?: Technique;
 }
 
 export interface TabSheet {

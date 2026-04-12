@@ -8,6 +8,7 @@ const COLORS = {
   Optimized: "#4ADE80",
   OctaveShifted: "#60A5FA",
   Technique: "#F472B6",
+  Slide: "#F472B6",
 };
 
 const LINE_HEIGHT = 28;
@@ -183,12 +184,45 @@ export function TabCanvas() {
         const textWidth = ctx.measureText(fretStr).width;
         const radius = Math.max(textWidth / 2 + 4, 10);
 
+        // Draw background circle to clear string line
         ctx.fillStyle = "#09090b";
         ctx.beginPath();
         ctx.arc(x, y, radius, 0, Math.PI * 2);
         ctx.fill();
 
-        ctx.fillStyle = getNoteColor(note.origin);
+        // Draw slide connector line if this is a slide note
+        if (note.technique === "Slide") {
+          // Find previous note on the same string in this row
+          const prevNote = tabSheet.notes
+            .filter(
+              (n) =>
+                n.string === note.string &&
+                n.onset < note.onset &&
+                n.onset >= rowStartTime &&
+                n.onset < rowEndTime
+            )
+            .sort((a, b) => b.onset - a.onset)[0];
+
+          if (prevNote) {
+            const prevRelTime = prevNote.onset - rowStartTime;
+            const prevX = LEFT_MARGIN + prevRelTime * pixelsPerSecond;
+            const prevY = rowY + (numStrings - 1 - prevNote.string) * LINE_HEIGHT;
+
+            // Draw diagonal slide line
+            ctx.strokeStyle = COLORS.Slide;
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.moveTo(prevX + radius, prevY);
+            ctx.lineTo(x - radius, y);
+            ctx.stroke();
+          }
+
+          // Draw fret number in slide color
+          ctx.fillStyle = COLORS.Slide;
+        } else {
+          ctx.fillStyle = getNoteColor(note.origin);
+        }
+
         ctx.fillText(fretStr, x, y);
       }
     }
