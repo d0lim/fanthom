@@ -6,23 +6,37 @@ const STRING_CROSS_COST: f64 = 2.0;
 const SAME_STRING_BONUS: f64 = -0.5;
 const STRETCH_PENALTY: f64 = 3.0;
 const STRETCH_THRESHOLD: u8 = 4;
-// Slight preference for higher-pitched strings (A, D, G over E) when fret cost ties.
-// Breaks the default E-string bias from candidate ordering. Small enough to not
-// override real costs (string cross = 2.0, fret jumps = 1.5+).
+// Small tie-break preference for higher-pitched strings (A, D, G over E).
 const HIGHER_STRING_BONUS: f64 = 0.25;
+// E string at high frets is uncomfortable (thickest string, long reach from nut).
+// Strong enough to overcome the same-string-continuation bias when a more
+// comfortable A/D position exists.
+const E_STRING_HIGH_FRET_PENALTY: f64 = 2.5;
 
 fn emission_cost(candidate: &Candidate) -> f64 {
     let mut cost = 0.0;
     if candidate.fret == 0 && candidate.string > 0 {
         cost += OPEN_STRING_PENALTY;
     }
+    // Graduated fret comfort: low frets (2-4) are the natural hand position,
+    // difficulty rises past fret 7 due to reach and string tension.
     cost += match candidate.fret {
         0 => 0.0,
-        1 => 0.0,
-        2..=9 => -1.5,
+        1 => -2.0,
+        2 => -3.0,
+        3 => -2.8,
+        4 => -2.6,
+        5 => -2.4,
+        6 => -2.2,
+        7 => -2.0,
+        8 => -1.2,
+        9 => -0.6,
         10..=14 => 1.0,
         _ => 3.0,
     };
+    if candidate.string == 0 && candidate.fret >= 7 {
+        cost += E_STRING_HIGH_FRET_PENALTY;
+    }
     cost -= candidate.string as f64 * HIGHER_STRING_BONUS;
     cost
 }
@@ -40,11 +54,14 @@ fn transition_cost(prev: &Candidate, curr: &Candidate) -> f64 {
     } else {
         (curr.fret as i8 - prev.fret as i8).unsigned_abs()
     };
+    // Reduced fret-jump costs: short hand movements are natural on bass, not
+    // disproportionately expensive. Previous multipliers (1.5 / 3.0 / 5.0) were
+    // too punishing for normal hand repositioning across strings.
     cost += match fret_diff {
         0..=1 => 0.0,
-        2..=3 => fret_diff as f64 * 1.5,
-        4..=5 => fret_diff as f64 * 3.0,
-        _ => fret_diff as f64 * 5.0,
+        2..=3 => fret_diff as f64 * 1.0,
+        4..=5 => fret_diff as f64 * 2.0,
+        _ => fret_diff as f64 * 3.5,
     };
     if string_diff > 0 && prev.fret > 0 && curr.fret > 0 {
         let span = (curr.fret as i8 - prev.fret as i8).unsigned_abs();
@@ -191,7 +208,39 @@ mod tests {
             make_note(36, 1.0, 1.5),
         ];
         let sheet = optimize(&notes, Tuning::Standard4, 120.0, (4, 4));
-        assert!(sheet.notes.iter().all(|n| n.string == 0));
+        // Adjacent notes should stay within a reasonable hand span — no huge
+        // fret jumps. Exact string choice depends on fret-cost balance.
+        for w in sheet.notes.windows(2) {
+            let diff = (w[1].fret as i8 - w[0].fret as i8).unsigned_abs();
+            assert!(
+                diff <= 4,
+                "adjacent notes should be within 4 frets, got fret {} -> {}",
+                w[0].fret,
+                w[1].fret
+            );
+        }
+    }
+
+    #[test]
+    fn transposed_passage_prefers_a_string_over_e_high_frets() {
+        // Original passage on A string: B1, B1, B1, C#2, E2 (frets 2,2,2,4,7).
+        // After -2 semitones: A1, A1, A1, B1, D2.
+        // A1 is forced to E-5 (A-0 has open-string penalty), but B1 and D2
+        // should stay on A string (A-2, A-5) rather than migrate to the
+        // uncomfortable E-7 / E-10 positions.
+        let notes = vec![
+            make_note(33, 0.0, 0.5), // A1
+            make_note(33, 0.5, 1.0),
+            make_note(33, 1.0, 1.5),
+            make_note(35, 1.5, 2.0), // B1
+            make_note(38, 2.0, 2.5), // D2
+        ];
+        let sheet = optimize(&notes, Tuning::Standard4, 120.0, (4, 4));
+        assert_eq!((sheet.notes[0].string, sheet.notes[0].fret), (0, 5));
+        assert_eq!((sheet.notes[1].string, sheet.notes[1].fret), (0, 5));
+        assert_eq!((sheet.notes[2].string, sheet.notes[2].fret), (0, 5));
+        assert_eq!((sheet.notes[3].string, sheet.notes[3].fret), (1, 2), "B1 should go to A-2, not E-7");
+        assert_eq!((sheet.notes[4].string, sheet.notes[4].fret), (1, 5), "D2 should go to A-5, not E-10");
     }
 
     #[test]
