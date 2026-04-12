@@ -1,4 +1,6 @@
+mod commands;
 mod db;
+mod sidecar;
 mod state;
 
 use state::AppState;
@@ -19,6 +21,12 @@ fn main() {
 
             Ok(())
         })
+        .invoke_handler(tauri::generate_handler![
+            commands::pipeline::process_url,
+            commands::tab::transpose,
+            commands::tab::toggle_optimization,
+            commands::tab::export_tab,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
