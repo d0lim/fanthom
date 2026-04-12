@@ -1,4 +1,4 @@
-use crate::tab::{TabNote, TabSheet, Tuning};
+use crate::tab::{TabSheet, Tuning};
 
 const CHARS_PER_BEAT: usize = 4;
 const BEATS_PER_MEASURE: usize = 4;
@@ -27,6 +27,11 @@ pub fn export(sheet: &TabSheet) -> String {
         let beat_pos = note.onset / beat_duration;
         let char_pos = (beat_pos * CHARS_PER_BEAT as f64).round() as usize;
         if char_pos < total_chars {
+            // Add slide marker before fret number
+            if note.technique == Some(crate::midi::Technique::Slide) && char_pos > 0 {
+                grid[note.string as usize][char_pos - 1] = "/".to_string();
+            }
+
             let fret_str = note.fret.to_string();
             let s = note.string as usize;
             for (i, ch) in fret_str.chars().enumerate() {
@@ -121,5 +126,33 @@ mod tests {
         let result = export(&sheet);
         let e_line = result.lines().find(|l| l.starts_with("E|")).unwrap();
         assert!(e_line.contains("12"));
+    }
+
+    #[test]
+    fn slide_renders_with_slash() {
+        use crate::midi::Technique;
+        let sheet = TabSheet {
+            notes: vec![
+                TabNote {
+                    string: 0, fret: 5, midi_pitch: 33,
+                    onset: 0.0, duration: 0.5,
+                    origin: NoteOrigin::Normal,
+                    technique: None,
+                },
+                TabNote {
+                    string: 0, fret: 7, midi_pitch: 35,
+                    onset: 0.5, duration: 0.5,
+                    origin: NoteOrigin::Normal,
+                    technique: Some(Technique::Slide),
+                },
+            ],
+            tempo: 120.0,
+            time_signature: (4, 4),
+            tuning: Tuning::Standard4,
+            key_transpose: 0,
+        };
+        let result = export(&sheet);
+        let e_line = result.lines().find(|l| l.starts_with("E|")).unwrap();
+        assert!(e_line.contains('/') || e_line.contains('\\'), "slide should have / or \\ marker: {}", e_line);
     }
 }
