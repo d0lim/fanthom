@@ -20,8 +20,8 @@ const MAX_FREQ: f64 = 500.0;
 const SILENCE_RMS: f64 = 0.005;
 const MIN_NOTE_SECS: f64 = 0.05;
 const ATTACK_SKIP_SECS: f64 = 0.06; // skip first 60ms after onset for pitch voting (overtone noise)
-const MERGE_RMS_DROP_RATIO: f64 = 0.5; // merge same-pitch notes if transition RMS > 50% of peak
-const ENERGY_WINDOW_SAMPLES: usize = 512; // ~12ms @ 44.1kHz — short-window RMS envelope
+const MERGE_RMS_DROP_RATIO: f64 = 0.6; // merge same-pitch notes if transition RMS > 60% of peak
+const ENERGY_WINDOW_SAMPLES: usize = 2048; // ~46ms @ 44.1kHz — covers 2 periods of E1 (lowest bass)
 
 #[derive(Clone, Copy, Debug)]
 struct PitchFrame {
