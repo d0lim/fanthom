@@ -23,6 +23,7 @@ pub fn transpose(
                     onset: note.onset,
                     offset: note.offset,
                     velocity: note.velocity,
+                    technique: note.technique,
                 },
                 octave_shift,
             )
@@ -67,7 +68,7 @@ mod tests {
     use super::*;
 
     fn make_note(pitch: u8, onset: f64) -> MidiNote {
-        MidiNote { pitch, onset, offset: onset + 0.5, velocity: 80 }
+        MidiNote { pitch, onset, offset: onset + 0.5, velocity: 80, technique: None }
     }
 
     #[test]

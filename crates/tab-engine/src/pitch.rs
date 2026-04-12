@@ -270,6 +270,7 @@ impl YinDetector {
                             onset,
                             offset: time,
                             velocity: rms_to_velocity(peak),
+                            technique: None,
                         });
                     }
                     current = next.map(|m| (m, time, rms));
@@ -289,6 +290,7 @@ impl YinDetector {
                     onset,
                     offset,
                     velocity: rms_to_velocity(peak),
+                    technique: None,
                 });
             }
         }

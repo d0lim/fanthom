@@ -141,7 +141,7 @@ mod tests {
     use super::*;
 
     fn make_note(pitch: u8, onset: f64, offset: f64) -> MidiNote {
-        MidiNote { pitch, onset, offset, velocity: 80 }
+        MidiNote { pitch, onset, offset, velocity: 80, technique: None }
     }
 
     #[test]
