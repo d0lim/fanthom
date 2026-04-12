@@ -1,0 +1,29 @@
+# Rust
+target/
+*.swp
+
+# Node
+node_modules/
+dist/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+
+# Tauri
+apps/desktop/src-tauri/target/
+
+# IDE
+.idea/
+.vscode/
+*.code-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+
+# App data
+*.wav
+*.mp3

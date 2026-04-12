@@ -1,0 +1,7 @@
+[tools]
+node = "22"
+python = "3.11"
+rust = "1.83"
+
+[env]
+PYTHONPATH = "./python/ai-pipeline"

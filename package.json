@@ -1,0 +1,10 @@
+{
+  "name": "fanthom",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm --filter desktop tauri dev",
+    "build": "pnpm --filter desktop tauri build",
+    "lint": "pnpm --filter desktop lint",
+    "typecheck": "pnpm --filter desktop typecheck"
+  }
+}
