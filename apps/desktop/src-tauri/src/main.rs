@@ -6,6 +6,10 @@ mod state;
 use state::AppState;
 
 fn main() {
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
+        .format_timestamp_millis()
+        .init();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {
@@ -25,6 +29,7 @@ fn main() {
             commands::pipeline::process_url,
             commands::tab::transpose,
             commands::tab::toggle_optimization,
+            commands::tab::regenerate_tab,
             commands::tab::export_tab,
         ])
         .run(tauri::generate_context!())

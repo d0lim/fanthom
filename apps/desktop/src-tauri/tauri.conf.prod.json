@@ -1,0 +1,6 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicedoc/tauri/refs/heads/dev/crates/tauri-cli/schema.json",
+  "bundle": {
+    "externalBin": ["binaries/ai-pipeline"]
+  }
+}

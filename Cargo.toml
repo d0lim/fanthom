@@ -4,3 +4,10 @@ members = [
     "crates/tab-engine",
     "apps/desktop/src-tauri",
 ]
+
+# Optimize numerical crates even in dev builds
+[profile.dev.package.tab-engine]
+opt-level = 2
+
+[profile.dev.package.rustfft]
+opt-level = 2

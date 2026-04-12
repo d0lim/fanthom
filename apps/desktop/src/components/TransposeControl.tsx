@@ -12,7 +12,7 @@ export function TransposeControl() {
     if (!state.midiNotesJson) return;
 
     try {
-      const newTab = await transposeTab(state.midiNotesJson, semitones);
+      const newTab = await transposeTab(state.midiNotesJson, semitones, state.bpm);
       dispatch({ type: "SET_TAB", tabSheet: newTab });
     } catch (err) {
       console.error("Transpose failed:", err);

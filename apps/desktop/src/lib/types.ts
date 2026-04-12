@@ -27,6 +27,12 @@ export interface TabSheet {
   key_transpose: number;
 }
 
+export interface PipelineResult {
+  tab_sheet: TabSheet;
+  midi_notes_json: string;
+  bass_path: string;
+}
+
 export interface PipelineProgress {
   step: string;
   percent: number;

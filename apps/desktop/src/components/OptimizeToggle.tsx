@@ -12,7 +12,7 @@ export function OptimizeToggle() {
     if (!state.midiNotesJson) return;
 
     try {
-      const newTab = await toggleOptimization(state.midiNotesJson, newValue);
+      const newTab = await toggleOptimization(state.midiNotesJson, newValue, state.bpm);
       dispatch({ type: "SET_TAB", tabSheet: newTab });
     } catch (err) {
       console.error("Toggle optimization failed:", err);

@@ -1,7 +1,7 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-/// A single note extracted from basic-pitch output.
-#[derive(Debug, Clone, Deserialize, PartialEq)]
+/// A single note extracted from pitch detection.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MidiNote {
     pub pitch: u8,
     pub onset: f64,

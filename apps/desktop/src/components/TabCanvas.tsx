@@ -10,12 +10,14 @@ const COLORS = {
   Technique: "#F472B6",
 };
 
-const LINE_HEIGHT = 32;
-const LEFT_MARGIN = 40;
-const TOP_MARGIN = 20;
-const PIXELS_PER_SECOND = 100;
-const NOTE_FONT = "bold 14px monospace";
-const LABEL_FONT = "12px monospace";
+const LINE_HEIGHT = 28;
+const LEFT_MARGIN = 36;
+const RIGHT_MARGIN = 16;
+const TOP_MARGIN = 16;
+const ROW_GAP = 32;
+const NOTE_FONT = "bold 13px monospace";
+const LABEL_FONT = "11px monospace";
+const MEASURE_FONT = "10px monospace";
 
 function getNoteColor(origin: NoteOrigin): string {
   if (origin === "Normal") return COLORS.Normal;
@@ -29,6 +31,8 @@ export function TabCanvas() {
   const containerRef = useRef<HTMLDivElement>(null);
   const state = useAppState();
   const tabSheet = state.tabSheet;
+  const bpm = state.bpm;
+  const startOffset = state.startOffset;
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -40,66 +44,138 @@ export function TabCanvas() {
 
     const rect = container.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
+    const numStrings = STRING_LABELS.length;
 
-    const lastNote = tabSheet.notes.reduce(
+    // Measure layout
+    const beatsPerMeasure = tabSheet.time_signature[0];
+    const secPerBeat = 60.0 / bpm;
+    const secPerMeasure = secPerBeat * beatsPerMeasure;
+
+    // Calculate how many measures fit per row
+    const availableWidth = rect.width - LEFT_MARGIN - RIGHT_MARGIN;
+    const minPixelsPerMeasure = 120;
+    const measuresPerRow = Math.max(1, Math.floor(availableWidth / minPixelsPerMeasure));
+    const pixelsPerMeasure = availableWidth / measuresPerRow;
+    const pixelsPerSecond = pixelsPerMeasure / secPerMeasure;
+
+    // Find total duration
+    const lastTime = tabSheet.notes.reduce(
       (max, n) => Math.max(max, n.onset + n.duration),
       0,
     );
-    const contentWidth = Math.max(
-      rect.width,
-      LEFT_MARGIN + lastNote * PIXELS_PER_SECOND + 100,
-    );
+    const totalDuration = Math.max(lastTime - startOffset, secPerMeasure);
+    const totalMeasures = Math.ceil(totalDuration / secPerMeasure);
+    const totalRows = Math.ceil(totalMeasures / measuresPerRow);
 
-    canvas.width = contentWidth * dpr;
-    canvas.height = rect.height * dpr;
-    canvas.style.width = `${contentWidth}px`;
-    canvas.style.height = `${rect.height}px`;
+    // Row height: strings + gap
+    const rowStringHeight = (numStrings - 1) * LINE_HEIGHT;
+    const rowHeight = rowStringHeight + ROW_GAP;
+    const canvasHeight = TOP_MARGIN + totalRows * rowHeight + ROW_GAP;
+
+    // Set canvas size
+    canvas.width = rect.width * dpr;
+    canvas.height = canvasHeight * dpr;
+    canvas.style.width = `${rect.width}px`;
+    canvas.style.height = `${canvasHeight}px`;
     ctx.scale(dpr, dpr);
 
+    // Background
     ctx.fillStyle = "#09090b";
-    ctx.fillRect(0, 0, contentWidth, rect.height);
+    ctx.fillRect(0, 0, rect.width, canvasHeight);
 
-    const numStrings = STRING_LABELS.length;
+    // Draw each row
+    for (let row = 0; row < totalRows; row++) {
+      const rowY = TOP_MARGIN + row * rowHeight;
+      const rowStartMeasure = row * measuresPerRow;
+      const rowStartTime = startOffset + rowStartMeasure * secPerMeasure;
+      const rowEndTime = rowStartTime + measuresPerRow * secPerMeasure;
 
-    ctx.strokeStyle = "#3f3f46";
-    ctx.lineWidth = 1;
-    for (let i = 0; i < numStrings; i++) {
-      const y = TOP_MARGIN + (numStrings - 1 - i) * LINE_HEIGHT;
-      ctx.beginPath();
-      ctx.moveTo(LEFT_MARGIN, y);
-      ctx.lineTo(contentWidth, y);
-      ctx.stroke();
+      // Draw string lines
+      ctx.strokeStyle = "#3f3f46";
+      ctx.lineWidth = 1;
+      for (let s = 0; s < numStrings; s++) {
+        const y = rowY + (numStrings - 1 - s) * LINE_HEIGHT;
+        ctx.beginPath();
+        ctx.moveTo(LEFT_MARGIN, y);
+        ctx.lineTo(rect.width - RIGHT_MARGIN, y);
+        ctx.stroke();
+      }
+
+      // String labels
+      ctx.fillStyle = "#71717a";
+      ctx.font = LABEL_FONT;
+      ctx.textAlign = "right";
+      ctx.textBaseline = "middle";
+      for (let s = 0; s < numStrings; s++) {
+        const y = rowY + (numStrings - 1 - s) * LINE_HEIGHT;
+        ctx.fillText(STRING_LABELS[s], LEFT_MARGIN - 8, y);
+      }
+
+      // Measure bars and numbers
+      for (let m = 0; m <= measuresPerRow; m++) {
+        const measureIdx = rowStartMeasure + m;
+        if (measureIdx > totalMeasures) break;
+        const x = LEFT_MARGIN + m * pixelsPerMeasure;
+
+        ctx.strokeStyle = m === 0 ? "#71717a" : "#3f3f46";
+        ctx.lineWidth = m === 0 ? 2 : 1;
+        ctx.beginPath();
+        ctx.moveTo(x, rowY);
+        ctx.lineTo(x, rowY + rowStringHeight);
+        ctx.stroke();
+
+        // Measure number
+        if (m < measuresPerRow && measureIdx < totalMeasures) {
+          ctx.fillStyle = "#52525b";
+          ctx.font = MEASURE_FONT;
+          ctx.textAlign = "left";
+          ctx.textBaseline = "bottom";
+          ctx.fillText(`${measureIdx + 1}`, x + 3, rowY - 2);
+        }
+
+        // Beat markers (thin dotted lines)
+        if (m < measuresPerRow) {
+          ctx.strokeStyle = "#27272a";
+          ctx.lineWidth = 0.5;
+          for (let beat = 1; beat < beatsPerMeasure; beat++) {
+            const bx = x + (beat / beatsPerMeasure) * pixelsPerMeasure;
+            ctx.beginPath();
+            ctx.setLineDash([2, 4]);
+            ctx.moveTo(bx, rowY);
+            ctx.lineTo(bx, rowY + rowStringHeight);
+            ctx.stroke();
+            ctx.setLineDash([]);
+          }
+        }
+      }
+
+      // Draw notes in this row
+      ctx.font = NOTE_FONT;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      for (const note of tabSheet.notes) {
+        if (note.onset < rowStartTime || note.onset >= rowEndTime) continue;
+
+        const relTime = note.onset - rowStartTime;
+        const x = LEFT_MARGIN + relTime * pixelsPerSecond;
+        const y = rowY + (numStrings - 1 - note.string) * LINE_HEIGHT;
+
+        const fretStr = note.fret.toString();
+        const textWidth = ctx.measureText(fretStr).width;
+        const radius = Math.max(textWidth / 2 + 4, 10);
+
+        // Background circle to clear string line
+        ctx.fillStyle = "#09090b";
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Fret number
+        ctx.fillStyle = getNoteColor(note.origin);
+        ctx.fillText(fretStr, x, y);
+      }
     }
-
-    ctx.fillStyle = "#a1a1aa";
-    ctx.font = LABEL_FONT;
-    ctx.textAlign = "right";
-    ctx.textBaseline = "middle";
-    for (let i = 0; i < numStrings; i++) {
-      const y = TOP_MARGIN + (numStrings - 1 - i) * LINE_HEIGHT;
-      ctx.fillText(STRING_LABELS[i], LEFT_MARGIN - 10, y);
-    }
-
-    ctx.font = NOTE_FONT;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    for (const note of tabSheet.notes) {
-      const x = LEFT_MARGIN + note.onset * PIXELS_PER_SECOND;
-      const y = TOP_MARGIN + (numStrings - 1 - note.string) * LINE_HEIGHT;
-
-      const fretStr = note.fret.toString();
-      const textWidth = ctx.measureText(fretStr).width;
-      const radius = Math.max(textWidth / 2 + 4, 10);
-
-      ctx.fillStyle = "#09090b";
-      ctx.beginPath();
-      ctx.arc(x, y, radius, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.fillStyle = getNoteColor(note.origin);
-      ctx.fillText(fretStr, x, y);
-    }
-  }, [tabSheet]);
+  }, [tabSheet, bpm, startOffset]);
 
   useEffect(() => {
     draw();
@@ -108,7 +184,7 @@ export function TabCanvas() {
   }, [draw]);
 
   return (
-    <div ref={containerRef} className="w-full h-full overflow-x-auto overflow-y-hidden">
+    <div ref={containerRef} className="w-full h-full overflow-y-auto overflow-x-hidden">
       <canvas ref={canvasRef} />
     </div>
   );

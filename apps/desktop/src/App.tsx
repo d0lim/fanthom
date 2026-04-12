@@ -3,6 +3,8 @@ import { AppStateContext, AppDispatchContext, appReducer, initialState } from ".
 import { UrlInput } from "./components/UrlInput";
 import { PipelineProgress } from "./components/PipelineProgress";
 import { TabCanvas } from "./components/TabCanvas";
+import { AudioPlayer } from "./components/AudioPlayer";
+import { BpmControl } from "./components/BpmControl";
 import { TransposeControl } from "./components/TransposeControl";
 import { OptimizeToggle } from "./components/OptimizeToggle";
 import { ExportMenu } from "./components/ExportMenu";
@@ -34,10 +36,16 @@ export default function App() {
           </main>
 
           {state.tabSheet && (
-            <footer className="border-t border-zinc-800 p-4 flex items-center gap-6">
+            <footer className="border-t border-zinc-800 p-3 flex flex-wrap items-center gap-4">
+              <AudioPlayer />
+              <div className="w-px h-6 bg-zinc-800" />
+              <BpmControl />
+              <div className="w-px h-6 bg-zinc-800" />
               <TransposeControl />
               <OptimizeToggle />
-              <ExportMenu />
+              <div className="ml-auto">
+                <ExportMenu />
+              </div>
             </footer>
           )}
         </div>

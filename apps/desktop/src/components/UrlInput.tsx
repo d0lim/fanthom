@@ -31,8 +31,13 @@ export function UrlInput() {
     });
 
     try {
-      const tabSheet = await processUrl(url);
-      dispatch({ type: "PIPELINE_DONE", tabSheet, midiNotesJson: "" });
+      const result = await processUrl(url);
+      dispatch({
+        type: "PIPELINE_DONE",
+        tabSheet: result.tab_sheet,
+        midiNotesJson: result.midi_notes_json,
+        bassPath: result.bass_path,
+      });
     } catch (err) {
       dispatch({ type: "PIPELINE_ERROR", message: String(err) });
     } finally {
