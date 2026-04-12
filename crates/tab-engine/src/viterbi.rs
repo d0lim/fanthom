@@ -6,6 +6,10 @@ const STRING_CROSS_COST: f64 = 2.0;
 const SAME_STRING_BONUS: f64 = -0.5;
 const STRETCH_PENALTY: f64 = 3.0;
 const STRETCH_THRESHOLD: u8 = 4;
+// Slight preference for higher-pitched strings (A, D, G over E) when fret cost ties.
+// Breaks the default E-string bias from candidate ordering. Small enough to not
+// override real costs (string cross = 2.0, fret jumps = 1.5+).
+const HIGHER_STRING_BONUS: f64 = 0.25;
 
 fn emission_cost(candidate: &Candidate) -> f64 {
     let mut cost = 0.0;
@@ -19,6 +23,7 @@ fn emission_cost(candidate: &Candidate) -> f64 {
         10..=14 => 1.0,
         _ => 3.0,
     };
+    cost -= candidate.string as f64 * HIGHER_STRING_BONUS;
     cost
 }
 
@@ -195,6 +200,18 @@ mod tests {
         let sheet = optimize(&notes, Tuning::Standard4, 120.0, (4, 4));
         assert_eq!(sheet.notes[0].string, 2);
         assert_eq!(sheet.notes[0].fret, 5);
+    }
+
+    #[test]
+    fn tied_comfort_zone_prefers_higher_string() {
+        // C2 (MIDI 36) has two comfort-zone candidates:
+        //   E string fret 8 (emission -1.5) vs A string fret 3 (emission -1.5)
+        // With the tie-break bonus, A string should win because it's more
+        // comfortable to play mid-fret notes on a higher string.
+        let notes = vec![make_note(36, 0.0, 0.5)];
+        let sheet = optimize(&notes, Tuning::Standard4, 120.0, (4, 4));
+        assert_eq!(sheet.notes[0].string, 1, "C2 should prefer A string over E string");
+        assert_eq!(sheet.notes[0].fret, 3);
     }
 
     #[test]

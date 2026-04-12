@@ -122,6 +122,29 @@ mod tests {
     }
 
     #[test]
+    fn transpose_down_keeps_notes_on_same_string_in_comfort_zone() {
+        // Original plays A string frets 7, 6, 5 = MIDI 40, 39, 38
+        let notes = vec![
+            make_note(40, 0.0),
+            make_note(39, 0.5),
+            make_note(38, 1.0),
+        ];
+        let sheet = transpose(&notes, -2, Tuning::Standard4, 120.0, (4, 4));
+        // After -2 semitones: MIDI 38, 37, 36 → should stay on A string (frets 5, 4, 3)
+        // NOT move to E string (frets 10, 9, 8 which are high-fret)
+        for (i, n) in sheet.notes.iter().enumerate() {
+            assert_eq!(
+                n.string, 1,
+                "note {} (MIDI {}) should be on A string (1), got string {} fret {}",
+                i, n.midi_pitch, n.string, n.fret
+            );
+        }
+        assert_eq!(sheet.notes[0].fret, 5);
+        assert_eq!(sheet.notes[1].fret, 4);
+        assert_eq!(sheet.notes[2].fret, 3);
+    }
+
+    #[test]
     fn transpose_preserves_technique() {
         use crate::midi::Technique;
         let notes = vec![
