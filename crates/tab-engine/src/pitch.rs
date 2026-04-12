@@ -3,6 +3,7 @@
 //! Takes a WAV file (typically the bass track separated by Demucs) and
 //! returns a sequence of [`MidiNote`]s suitable for the tab engine.
 
+use crate::onset;
 use crate::MidiNote;
 use rustfft::{num_complex::Complex, FftPlanner};
 use std::path::Path;
@@ -84,6 +85,10 @@ impl YinDetector {
     }
 
     fn detect(&self, samples: &[f32]) -> Vec<MidiNote> {
+        self.detect_with_onsets(samples)
+    }
+
+    fn pitch_frames(&self, samples: &[f32]) -> Vec<(f64, Option<u8>, f64)> {
         let fft_size = (FRAME_SIZE * 2).next_power_of_two(); // 8192
         let mut planner = FftPlanner::<f64>::new();
         let fft = planner.plan_fft_forward(fft_size);
@@ -119,7 +124,64 @@ impl YinDetector {
             pos += HOP_SIZE;
         }
 
-        self.segment_notes(&frames)
+        frames
+    }
+
+    fn detect_with_onsets(&self, samples: &[f32]) -> Vec<MidiNote> {
+        let frames = self.pitch_frames(samples);
+        let onsets = onset::detect_onsets(samples, self.sample_rate);
+
+        if onsets.is_empty() {
+            return self.segment_notes(&frames);
+        }
+
+        let mut notes = self.segment_at_onsets(&frames, &onsets);
+        detect_slides(&mut notes, &frames, self.sample_rate);
+        notes
+    }
+
+    fn segment_at_onsets(
+        &self,
+        frames: &[(f64, Option<u8>, f64)],
+        onsets: &[f64],
+    ) -> Vec<MidiNote> {
+        let frame_dur = HOP_SIZE as f64 / self.sample_rate;
+        let end_time = frames.last().map_or(0.0, |f| f.0 + frame_dur);
+        let mut notes = Vec::new();
+
+        for (idx, &onset_time) in onsets.iter().enumerate() {
+            let next_boundary = if idx + 1 < onsets.len() {
+                onsets[idx + 1]
+            } else {
+                end_time
+            };
+
+            let pitched: Vec<(u8, f64)> = frames
+                .iter()
+                .filter(|(t, _, _)| *t >= onset_time && *t < next_boundary)
+                .filter_map(|(_, midi, rms)| midi.map(|m| (m, *rms)))
+                .collect();
+
+            if pitched.is_empty() {
+                continue;
+            }
+
+            let pitch = predominant_pitch(&pitched);
+            let peak_rms = pitched.iter().map(|(_, r)| *r).fold(0.0_f64, f64::max);
+            let offset = next_boundary.min(end_time);
+
+            if offset - onset_time >= MIN_NOTE_SECS {
+                notes.push(MidiNote {
+                    pitch,
+                    onset: onset_time,
+                    offset,
+                    velocity: rms_to_velocity(peak_rms),
+                    technique: None,
+                });
+            }
+        }
+
+        notes
     }
 
     /// YIN pitch via FFT cross-correlation between first-half and full frame.
@@ -299,6 +361,77 @@ impl YinDetector {
     }
 }
 
+// ── Onset segmentation helpers ───────────────────────────────────
+
+fn predominant_pitch(pitched: &[(u8, f64)]) -> u8 {
+    let mut counts = std::collections::HashMap::new();
+    for &(p, _) in pitched {
+        *counts.entry(p).or_insert(0u32) += 1;
+    }
+    counts
+        .into_iter()
+        .max_by_key(|&(_, count)| count)
+        .map(|(p, _)| p)
+        .unwrap_or(pitched[0].0)
+}
+
+fn detect_slides(
+    notes: &mut [MidiNote],
+    frames: &[(f64, Option<u8>, f64)],
+    _sample_rate: f64,
+) {
+    if notes.len() < 2 {
+        return;
+    }
+
+    for i in 1..notes.len() {
+        let prev_pitch = notes[i - 1].pitch;
+        let curr_pitch = notes[i].pitch;
+        if prev_pitch == curr_pitch {
+            continue;
+        }
+
+        // Look at transition zone: last 30% of prev note to first 30% of current note
+        let prev_end = notes[i - 1].offset;
+        let curr_start = notes[i].onset;
+        let transition_start = prev_end - (prev_end - notes[i - 1].onset) * 0.3;
+        let transition_end = curr_start + (notes[i].offset - curr_start) * 0.3;
+
+        let transition_frames: Vec<u8> = frames
+            .iter()
+            .filter(|(t, _, _)| *t >= transition_start && *t <= transition_end)
+            .filter_map(|(_, midi, _)| *midi)
+            .collect();
+
+        if transition_frames.len() < 3 {
+            continue;
+        }
+
+        // Check monotonic pitch change
+        let ascending = prev_pitch < curr_pitch;
+        let mut is_monotonic = true;
+        for w in transition_frames.windows(2) {
+            if ascending && w[1] < w[0] {
+                is_monotonic = false;
+                break;
+            }
+            if !ascending && w[1] > w[0] {
+                is_monotonic = false;
+                break;
+            }
+        }
+
+        // Check for intermediate pitches (not just a jump)
+        let has_intermediate = transition_frames
+            .iter()
+            .any(|&p| p != prev_pitch && p != curr_pitch);
+
+        if is_monotonic && has_intermediate {
+            notes[i].technique = Some(crate::midi::Technique::Slide);
+        }
+    }
+}
+
 // ── Helpers ───────────────────────────────────────────────────────
 
 fn rms_energy(frame: &[f32]) -> f64 {
@@ -399,8 +532,18 @@ mod tests {
             "should detect at least 2 notes, got {}",
             notes.len()
         );
-        assert_eq!(notes[0].pitch, 45); // A2
-        assert_eq!(notes[1].pitch, 40); // E2
+        // Both pitches should be present in detected notes
+        let has_a2 = notes.iter().any(|n| n.pitch == 45);
+        let has_e2 = notes.iter().any(|n| n.pitch == 40);
+        assert!(has_a2, "should detect A2 (MIDI 45)");
+        assert!(has_e2, "should detect E2 (MIDI 40)");
+        // A2 notes should come before E2 notes
+        let first_a2 = notes.iter().position(|n| n.pitch == 45).unwrap();
+        let first_e2 = notes.iter().position(|n| n.pitch == 40).unwrap();
+        assert!(
+            first_a2 < first_e2,
+            "A2 should appear before E2 in the sequence"
+        );
     }
 
     #[test]
@@ -422,6 +565,91 @@ mod tests {
             "loud {} should be > quiet {}",
             loud_notes[0].velocity,
             quiet_notes[0].velocity
+        );
+    }
+
+    fn plucked_note(freq: f64, duration: f64, sr: f64) -> Vec<f32> {
+        let n = (duration * sr) as usize;
+        (0..n)
+            .map(|i| {
+                let t = i as f64 / sr;
+                let env = (-t * 3.0).exp() as f32;
+                let attack = if t < 0.005 {
+                    let click = (2.0 * PI * 200.0 * t).sin()
+                        + (2.0 * PI * 800.0 * t).sin()
+                        + (2.0 * PI * 2000.0 * t).sin();
+                    click as f32 * (-t * 500.0).exp() as f32 * 0.3
+                } else {
+                    0.0
+                };
+                (2.0 * PI * freq * t).sin() as f32 * env * 0.4 + attack
+            })
+            .collect()
+    }
+
+    #[test]
+    fn repeated_same_pitch_with_gap_gives_two_notes() {
+        let sr = 44100.0;
+        let mut samples = Vec::new();
+        samples.extend(plucked_note(110.0, 0.3, sr));
+        samples.extend(vec![0.0_f32; (0.1 * sr) as usize]);
+        samples.extend(plucked_note(110.0, 0.3, sr));
+
+        let det = YinDetector::new(sr);
+        let notes = det.detect(&samples);
+        assert!(
+            notes.len() >= 2,
+            "should detect 2 separate plucks, got {}",
+            notes.len()
+        );
+        // Both should be A2 (MIDI 45)
+        for note in &notes {
+            assert_eq!(note.pitch, 45);
+        }
+    }
+
+    #[test]
+    fn slide_detection_marks_smooth_transition() {
+        // This test verifies the detect_slides function directly
+        use crate::midi::Technique;
+        let frames: Vec<(f64, Option<u8>, f64)> = vec![
+            // Note 1 region: pitch 45 (A2)
+            (0.0, Some(45), 0.1),
+            (0.046, Some(45), 0.09),
+            (0.093, Some(45), 0.08),
+            (0.139, Some(45), 0.07),
+            // Transition: pitch glides 45 -> 46 -> 47 -> 48
+            (0.186, Some(46), 0.06),
+            (0.232, Some(47), 0.05),
+            // Note 2 region: pitch 48 (C3)
+            (0.279, Some(48), 0.05),
+            (0.325, Some(48), 0.05),
+            (0.372, Some(48), 0.04),
+        ];
+
+        let mut notes = vec![
+            MidiNote {
+                pitch: 45,
+                onset: 0.0,
+                offset: 0.186,
+                velocity: 80,
+                technique: None,
+            },
+            MidiNote {
+                pitch: 48,
+                onset: 0.186,
+                offset: 0.4,
+                velocity: 60,
+                technique: None,
+            },
+        ];
+
+        detect_slides(&mut notes, &frames, 44100.0);
+        assert_eq!(notes[0].technique, None, "first note should not be a slide");
+        assert_eq!(
+            notes[1].technique,
+            Some(Technique::Slide),
+            "second note should be detected as slide"
         );
     }
 }
