@@ -60,7 +60,10 @@ pub fn export(sheet: &TabSheet) -> String {
                 xml.push_str(&format!("        <type>{}</type>\n", note_type));
                 xml.push_str("        <notations>\n");
                 xml.push_str("          <technical>\n");
-                xml.push_str(&format!("            <string>{}</string>\n", note.string + 1));
+                // MusicXML convention: string 1 = highest pitch, string N = lowest.
+                // Our internal convention: string 0 = lowest (E), string N-1 = highest (G).
+                let mx_string = sheet.tuning.num_strings() - note.string;
+                xml.push_str(&format!("            <string>{}</string>\n", mx_string));
                 xml.push_str(&format!("            <fret>{}</fret>\n", note.fret));
                 xml.push_str("          </technical>\n");
                 xml.push_str("        </notations>\n");
@@ -162,6 +165,7 @@ mod tests {
 
     #[test]
     fn single_note_produces_tab_notation() {
+        // E string (internal 0) = lowest pitch = MusicXML string 4 (on 4-string bass)
         let sheet = TabSheet {
             notes: vec![make_tab_note(0, 5, 0.0, 0.5)],
             tempo: 120.0,
@@ -170,9 +174,24 @@ mod tests {
             key_transpose: 0,
         };
         let xml = export(&sheet);
-        assert!(xml.contains("<string>1</string>"));
+        assert!(xml.contains("<string>4</string>"));
         assert!(xml.contains("<fret>5</fret>"));
         assert!(xml.contains("<sign>TAB</sign>"));
+    }
+
+    #[test]
+    fn g_string_maps_to_musicxml_string_1() {
+        // G string (internal 3) = highest pitch = MusicXML string 1
+        let sheet = TabSheet {
+            notes: vec![make_tab_note(3, 7, 0.0, 0.5)],
+            tempo: 120.0,
+            time_signature: (4, 4),
+            tuning: Tuning::Standard4,
+            key_transpose: 0,
+        };
+        let xml = export(&sheet);
+        assert!(xml.contains("<string>1</string>"));
+        assert!(xml.contains("<fret>7</fret>"));
     }
 
     #[test]
