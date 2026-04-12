@@ -5,14 +5,13 @@ use crate::viterbi;
 const BASS_MIN: u8 = 28;
 const BASS_MAX: u8 = 67;
 
-pub fn transpose(
+/// Transpose MidiNotes by `semitones`, clamping out-of-range notes with octave shift.
+/// Returns each transposed note paired with its octave shift (None if in range).
+pub fn transpose_notes(
     original_notes: &[MidiNote],
     semitones: i8,
-    tuning: Tuning,
-    tempo: f64,
-    time_sig: (u8, u8),
-) -> crate::tab::TabSheet {
-    let transposed: Vec<(MidiNote, Option<i8>)> = original_notes
+) -> Vec<(MidiNote, Option<i8>)> {
+    original_notes
         .iter()
         .map(|note| {
             let raw = note.pitch as i16 + semitones as i16;
@@ -28,7 +27,17 @@ pub fn transpose(
                 octave_shift,
             )
         })
-        .collect();
+        .collect()
+}
+
+pub fn transpose(
+    original_notes: &[MidiNote],
+    semitones: i8,
+    tuning: Tuning,
+    tempo: f64,
+    time_sig: (u8, u8),
+) -> crate::tab::TabSheet {
+    let transposed = transpose_notes(original_notes, semitones);
 
     let midi_notes: Vec<MidiNote> = transposed.iter().map(|(n, _)| n.clone()).collect();
     let mut sheet = viterbi::optimize(&midi_notes, tuning, tempo, time_sig);

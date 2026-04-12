@@ -1,5 +1,5 @@
 import { useAppState, useAppDispatch } from "../state";
-import { transposeTab } from "../lib/tauri";
+import { regenerateTab } from "../lib/tauri";
 
 export function TransposeControl() {
   const state = useAppState();
@@ -12,7 +12,12 @@ export function TransposeControl() {
     if (!state.midiNotesJson) return;
 
     try {
-      const newTab = await transposeTab(state.midiNotesJson, semitones, state.bpm);
+      const newTab = await regenerateTab(
+        state.midiNotesJson,
+        state.bpm,
+        semitones,
+        state.optimized,
+      );
       dispatch({ type: "SET_TAB", tabSheet: newTab });
     } catch (err) {
       console.error("Transpose failed:", err);

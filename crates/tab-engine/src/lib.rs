@@ -9,5 +9,5 @@ pub mod viterbi;
 pub use midi::{MidiNote, Technique};
 pub use pitch::transcribe_wav;
 pub use tab::{Candidate, NoteOrigin, TabNote, TabSheet, Tuning, pitch_to_candidates};
-pub use transpose::transpose;
+pub use transpose::{transpose, transpose_notes};
 pub use viterbi::optimize;

@@ -1,5 +1,5 @@
 import { useAppState, useAppDispatch } from "../state";
-import { toggleOptimization } from "../lib/tauri";
+import { regenerateTab } from "../lib/tauri";
 
 export function OptimizeToggle() {
   const state = useAppState();
@@ -12,7 +12,12 @@ export function OptimizeToggle() {
     if (!state.midiNotesJson) return;
 
     try {
-      const newTab = await toggleOptimization(state.midiNotesJson, newValue, state.bpm);
+      const newTab = await regenerateTab(
+        state.midiNotesJson,
+        state.bpm,
+        state.transpose,
+        newValue,
+      );
       dispatch({ type: "SET_TAB", tabSheet: newTab });
     } catch (err) {
       console.error("Toggle optimization failed:", err);
