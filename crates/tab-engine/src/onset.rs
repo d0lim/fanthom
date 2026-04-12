@@ -1,13 +1,14 @@
 //! Spectral-flux onset detection for plucked string instruments.
 
+use rayon::prelude::*;
 use rustfft::{num_complex::Complex, FftPlanner};
 use std::f64::consts::PI;
 
 const ONSET_FRAME_SIZE: usize = 1024;
-const ONSET_HOP_SIZE: usize = 256;
-const ADAPTIVE_WINDOW: usize = 10;
+const ONSET_HOP_SIZE: usize = 128; // ~2.9 ms — 2x precision (was 256)
+const ADAPTIVE_WINDOW: usize = 20; // scaled up with HOP_SIZE reduction (maintains ~58ms coverage)
 const FLUX_MULTIPLIER: f64 = 1.5;
-const FLUX_OFFSET: f64 = 0.005;
+const FLUX_OFFSET: f64 = 0.007;
 const MIN_ONSET_GAP_SECS: f64 = 0.05;
 
 /// Detect note onset times in an audio signal using spectral flux.
@@ -31,35 +32,46 @@ fn spectral_flux(samples: &[f32], _sample_rate: f64) -> Vec<f64> {
         .map(|i| 0.5 * (1.0 - (2.0 * PI * i as f64 / (ONSET_FRAME_SIZE - 1) as f64).cos()))
         .collect();
 
-    let mut buf = vec![Complex::new(0.0, 0.0); fft_size];
-    let mut prev_mag = vec![0.0_f64; num_bins];
-    let mut flux_values = Vec::new();
+    let num_frames = if samples.len() >= ONSET_FRAME_SIZE {
+        (samples.len() - ONSET_FRAME_SIZE) / ONSET_HOP_SIZE + 1
+    } else {
+        return vec![];
+    };
 
-    let mut pos = 0;
-    while pos + ONSET_FRAME_SIZE <= samples.len() {
-        for i in 0..ONSET_FRAME_SIZE {
-            buf[i] = Complex::new(samples[pos + i] as f64 * hann[i], 0.0);
-        }
-        for b in buf[ONSET_FRAME_SIZE..].iter_mut() {
-            *b = Complex::new(0.0, 0.0);
-        }
+    // Phase 1: Parallel FFT + magnitude per frame
+    let magnitudes: Vec<Vec<f64>> = (0..num_frames)
+        .into_par_iter()
+        .map_init(
+            || vec![Complex::new(0.0, 0.0); fft_size],
+            |buf, i| {
+                let pos = i * ONSET_HOP_SIZE;
+                for j in 0..ONSET_FRAME_SIZE {
+                    buf[j] = Complex::new(samples[pos + j] as f64 * hann[j], 0.0);
+                }
+                for b in buf[ONSET_FRAME_SIZE..].iter_mut() {
+                    *b = Complex::new(0.0, 0.0);
+                }
+                fft.process(buf);
+                (0..num_bins)
+                    .map(|j| (buf[j].re.powi(2) + buf[j].im.powi(2)).sqrt())
+                    .collect()
+            },
+        )
+        .collect();
 
-        fft.process(&mut buf);
-
-        let mag: Vec<f64> = (0..num_bins)
-            .map(|i| (buf[i].re.powi(2) + buf[i].im.powi(2)).sqrt())
-            .collect();
-
-        let flux: f64 = mag.iter().zip(prev_mag.iter())
+    // Phase 2: Sequential flux differencing (lightweight)
+    let mut flux = vec![0.0]; // First frame has no previous
+    for w in magnitudes.windows(2) {
+        let f: f64 = w[1]
+            .iter()
+            .zip(w[0].iter())
             .map(|(c, p)| (c - p).max(0.0))
-            .sum::<f64>() / num_bins as f64;
-
-        flux_values.push(flux);
-        prev_mag = mag;
-        pos += ONSET_HOP_SIZE;
+            .sum::<f64>()
+            / num_bins as f64;
+        flux.push(f);
     }
 
-    flux_values
+    flux
 }
 
 fn peak_pick(flux: &[f64], sample_rate: f64) -> Vec<f64> {

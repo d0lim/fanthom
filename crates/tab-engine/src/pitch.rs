@@ -143,8 +143,10 @@ impl YinDetector {
     }
 
     fn detect_with_onsets(&self, samples: &[f32]) -> Vec<MidiNote> {
-        let frames = self.pitch_frames(samples);
-        let onsets = onset::detect_onsets(samples, self.sample_rate);
+        let (frames, onsets) = rayon::join(
+            || self.pitch_frames(samples),
+            || onset::detect_onsets(samples, self.sample_rate),
+        );
 
         if onsets.is_empty() {
             return self.segment_notes(&frames);
