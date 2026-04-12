@@ -1,5 +1,6 @@
 pub mod export;
 pub mod midi;
+pub mod onset;
 pub mod pitch;
 pub mod tab;
 pub mod transpose;
