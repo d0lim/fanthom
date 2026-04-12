@@ -47,9 +47,6 @@ def main() -> None:
             elif command == "separate":
                 from separate import run_separate
                 run_separate(params)
-            elif command == "transcribe":
-                from transcribe import run_transcribe
-                run_transcribe(params)
             else:
                 send_error("unknown", f"Unknown command: {command}")
         except Exception as e:

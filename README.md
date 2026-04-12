@@ -16,7 +16,8 @@ YouTube URL
 2. Bass Track Separation (Demucs v4)
     |
     v
-3. Pitch Detection (basic-pitch)
+3. Pitch Detection (FFT-accelerated YIN, Rust)
+   + Onset Detection (Spectral Flux, Rust)
     |
     v
 4. Tab Generation + Fingering Optimization (Viterbi DP)
@@ -29,15 +30,20 @@ Paste a YouTube URL, and Fanthom will:
 
 1. **Extract** the audio from the video
 2. **Separate** the bass track using Meta's Demucs neural network
-3. **Detect** pitches using Spotify's basic-pitch model
+3. **Detect** pitches using FFT-accelerated YIN algorithm and onsets via spectral flux — both in Rust with rayon parallelization
 4. **Generate** a tab with Viterbi DP fingering optimization that minimizes hand movement
 
 ## Features
 
+- **Rust Pitch Detection** — FFT-accelerated YIN algorithm with confidence-weighted estimation, parallelized with rayon for near-instant transcription
+- **Onset Detection** — Spectral flux onset detection identifies pluck transients, enabling accurate note segmentation (distinguishes sustained notes from repeated same-pitch notes)
+- **Slide Detection** — Automatically detects slides by analyzing pitch contour between notes; Viterbi enforces same-string constraint for slide-connected notes
 - **Viterbi DP Fingering Optimization** — Finds the optimal fingering path across the entire song, minimizing hand position jumps, avoiding awkward stretches, and preferring the comfort zone (frets 2-9)
+- **Audio Playback** — Play the extracted bass track with a synced playhead indicator on the tab canvas
+- **BPM & Start Offset Control** — Adjust BPM and start offset to align tab measures with the music
 - **Transpose** — Shift up or down by up to 12 semitones with automatic octave correction for notes that fall outside the bass range
-- **Color-Coded Notation** — Gold for normal notes, green for optimized positions, blue for octave-shifted notes
-- **Export** — MusicXML (open in MuseScore, Guitar Pro, etc.) or ASCII text tab (copy to clipboard)
+- **Color-Coded Notation** — Gold for normal notes, green for optimized positions, blue for octave-shifted notes, pink for slides
+- **Export** — MusicXML (open in MuseScore, Guitar Pro, etc.) or ASCII text tab with slide notation
 - **Fully Local** — All processing happens on your machine. No cloud, no account, no tracking.
 
 ## Getting Started
@@ -81,22 +87,23 @@ Fanthom is a Tauri v2 desktop app with a monorepo structure:
 ```
 fanthom/
 ├── crates/tab-engine/     # Rust — Tab generation engine (pure library)
-│   ├── midi.rs            #   MIDI note parsing
+│   ├── pitch.rs           #   FFT-accelerated YIN pitch detection (rayon-parallel)
+│   ├── onset.rs           #   Spectral flux onset detection (rayon-parallel)
+│   ├── midi.rs            #   MIDI note + technique types
 │   ├── tab.rs             #   Note-to-fretboard mapping
 │   ├── viterbi.rs         #   Viterbi DP fingering optimization
 │   ├── transpose.rs       #   Transposition with octave correction
 │   └── export/            #   MusicXML + ASCII text export
 ├── python/ai-pipeline/    # Python — AI sidecar process
 │   ├── extract.py         #   yt-dlp audio extraction
-│   ├── separate.py        #   Demucs source separation
-│   └── transcribe.py      #   basic-pitch pitch detection
+│   └── separate.py        #   Demucs source separation
 ├── apps/desktop/          # Tauri v2 desktop app
-│   ├── src/               #   React + Tailwind frontend
+│   ├── src/               #   React + Tailwind + Canvas frontend
 │   └── src-tauri/         #   Rust backend (commands, SQLite, sidecar mgmt)
 └── .github/workflows/     # CI
 ```
 
-**Data flow:** React UI invokes Rust commands via Tauri. Rust orchestrates the Python sidecar (JSON Lines over stdin/stdout) for AI workloads, then runs the tab engine in-process for instant tab generation and transpose.
+**Data flow:** React UI invokes Rust commands via Tauri. Rust orchestrates the Python sidecar (JSON Lines over stdin/stdout) for audio extraction and source separation, then runs pitch detection, onset detection, and tab generation entirely in-process using the tab-engine crate.
 
 ## Tech Stack
 
@@ -104,8 +111,8 @@ fanthom/
 |-------|-----------|
 | Desktop | Tauri v2 |
 | Frontend | React, Vite, Tailwind CSS |
-| Tab Engine | Rust |
-| AI Pipeline | Python (Demucs, basic-pitch, yt-dlp) |
+| Tab Engine | Rust (rustfft, rayon) |
+| AI Pipeline | Python (Demucs, yt-dlp) |
 | Database | SQLite |
 | Runtime Management | mise |
 
@@ -125,8 +132,11 @@ Time complexity is O(N) for 4-string bass (at most 4 candidates per note), proce
 
 ## Roadmap
 
-- [ ] Technique detection (slap, pop, hammer-on, pull-off)
-- [ ] Loop playback with BPM control
+- [x] Slide detection
+- [x] Audio playback with synced playhead
+- [x] BPM and start offset controls
+- [ ] Additional technique detection (slap, pop, hammer-on, pull-off)
+- [ ] Loop playback for practice
 - [ ] PDF export
 - [ ] 5-string / 6-string bass support
 - [ ] Guitar and drum track support

@@ -114,13 +114,6 @@ fn peak_pick(flux: &[f64], sample_rate: f64) -> Vec<f64> {
 mod tests {
     use super::*;
 
-    fn sine_wave(freq: f64, duration: f64, sr: f64) -> Vec<f32> {
-        let n = (duration * sr) as usize;
-        (0..n)
-            .map(|i| (2.0 * PI * freq * i as f64 / sr).sin() as f32 * 0.5)
-            .collect()
-    }
-
     fn plucked_note(freq: f64, duration: f64, sr: f64) -> Vec<f32> {
         let n = (duration * sr) as usize;
         (0..n)
