@@ -173,6 +173,17 @@ export function TabCanvas() {
       ctx.font = NOTE_FONT;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
+
+      // Phase 1: compute draw info for all notes in this row
+      type DrawNote = {
+        note: typeof tabSheet.notes[number];
+        drawX: number;
+        y: number;
+        radius: number;
+        fretStr: string;
+        color: string;
+      };
+      const rowDrawNotes: DrawNote[] = [];
       for (const note of tabSheet.notes) {
         if (note.onset < rowStartTime || note.onset >= rowEndTime) continue;
 
@@ -184,52 +195,41 @@ export function TabCanvas() {
         const textWidth = ctx.measureText(fretStr).width;
         const radius = Math.max(textWidth / 2 + 4, 10);
 
-        // Clamp position so notes don't get clipped at row edges
         const xMin = LEFT_MARGIN + radius;
         const xMax = rect.width - RIGHT_MARGIN - radius;
         const drawX = Math.max(xMin, Math.min(x, xMax));
 
-        // Draw background circle to clear string line
-        ctx.fillStyle = "#09090b";
+        const color = note.technique === "Slide" ? COLORS.Slide : getNoteColor(note.origin);
+        rowDrawNotes.push({ note, drawX, y, radius, fretStr, color });
+      }
+
+      // Phase 2: draw all slide connector lines (underneath circles)
+      for (const dn of rowDrawNotes) {
+        if (dn.note.technique !== "Slide") continue;
+        const prev = rowDrawNotes
+          .filter((p) => p.note.string === dn.note.string && p.note.onset < dn.note.onset)
+          .sort((a, b) => b.note.onset - a.note.onset)[0];
+        if (!prev) continue;
+        ctx.strokeStyle = COLORS.Slide;
+        ctx.lineWidth = 1.5;
         ctx.beginPath();
-        ctx.arc(drawX, y, radius, 0, Math.PI * 2);
+        ctx.moveTo(prev.drawX + prev.radius, prev.y);
+        ctx.lineTo(dn.drawX - dn.radius, dn.y);
+        ctx.stroke();
+      }
+
+      // Phase 3: draw all background circles
+      ctx.fillStyle = "#09090b";
+      for (const dn of rowDrawNotes) {
+        ctx.beginPath();
+        ctx.arc(dn.drawX, dn.y, dn.radius, 0, Math.PI * 2);
         ctx.fill();
+      }
 
-        // Draw slide connector line if this is a slide note
-        if (note.technique === "Slide") {
-          // Find previous note on the same string in this row
-          const prevNote = tabSheet.notes
-            .filter(
-              (n) =>
-                n.string === note.string &&
-                n.onset < note.onset &&
-                n.onset >= rowStartTime &&
-                n.onset < rowEndTime
-            )
-            .sort((a, b) => b.onset - a.onset)[0];
-
-          if (prevNote) {
-            const prevRelTime = prevNote.onset - rowStartTime;
-            const prevRawX = LEFT_MARGIN + prevRelTime * pixelsPerSecond;
-            const prevDrawX = Math.max(xMin, Math.min(prevRawX, xMax));
-            const prevY = rowY + (numStrings - 1 - prevNote.string) * LINE_HEIGHT;
-
-            // Draw diagonal slide line
-            ctx.strokeStyle = COLORS.Slide;
-            ctx.lineWidth = 1.5;
-            ctx.beginPath();
-            ctx.moveTo(prevDrawX + radius, prevY);
-            ctx.lineTo(drawX - radius, y);
-            ctx.stroke();
-          }
-
-          // Draw fret number in slide color
-          ctx.fillStyle = COLORS.Slide;
-        } else {
-          ctx.fillStyle = getNoteColor(note.origin);
-        }
-
-        ctx.fillText(fretStr, drawX, y);
+      // Phase 4: draw all fret numbers on top
+      for (const dn of rowDrawNotes) {
+        ctx.fillStyle = dn.color;
+        ctx.fillText(dn.fretStr, dn.drawX, dn.y);
       }
     }
   }, [tabSheet, bpm, startOffset]);
