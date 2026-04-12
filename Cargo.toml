@@ -11,3 +11,6 @@ opt-level = 2
 
 [profile.dev.package.rustfft]
 opt-level = 2
+
+[profile.dev.package.rayon]
+opt-level = 2

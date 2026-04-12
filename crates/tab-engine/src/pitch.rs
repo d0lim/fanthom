@@ -19,6 +19,14 @@ const MAX_FREQ: f64 = 500.0;
 const SILENCE_RMS: f64 = 0.005;
 const MIN_NOTE_SECS: f64 = 0.05;
 
+#[derive(Clone, Copy, Debug)]
+struct PitchFrame {
+    time: f64,
+    midi: Option<u8>,
+    rms: f64,
+    confidence: f64,
+}
+
 // ── Public API ────────────────────────────────────────────────────
 
 /// Read a WAV file and detect pitched notes using the YIN algorithm.
@@ -88,7 +96,7 @@ impl YinDetector {
         self.detect_with_onsets(samples)
     }
 
-    fn pitch_frames(&self, samples: &[f32]) -> Vec<(f64, Option<u8>, f64)> {
+    fn pitch_frames(&self, samples: &[f32]) -> Vec<PitchFrame> {
         let fft_size = (FRAME_SIZE * 2).next_power_of_two(); // 8192
         let mut planner = FftPlanner::<f64>::new();
         let fft = planner.plan_fft_forward(fft_size);
@@ -98,7 +106,7 @@ impl YinDetector {
         let mut buf_half = vec![Complex::new(0.0, 0.0); fft_size];
         let mut buf_full = vec![Complex::new(0.0, 0.0); fft_size];
 
-        let mut frames: Vec<(f64, Option<u8>, f64)> = Vec::new();
+        let mut frames = Vec::new();
         let mut pos = 0;
 
         while pos + FRAME_SIZE <= samples.len() {
@@ -106,21 +114,18 @@ impl YinDetector {
             let time = pos as f64 / self.sample_rate;
             let rms = rms_energy(frame);
 
-            let midi = if rms < SILENCE_RMS {
-                None
+            let (midi, confidence) = if rms < SILENCE_RMS {
+                (None, 0.0)
             } else {
-                self.yin_pitch_fft(frame, &fft, &ifft, &mut buf_half, &mut buf_full)
-                    .and_then(|freq| {
-                        let m = freq_to_midi(freq);
-                        if (28..=67).contains(&m) {
-                            Some(m)
-                        } else {
-                            None
-                        }
-                    })
+                let (freq, conf) = self.yin_pitch_fft(frame, &fft, &ifft, &mut buf_half, &mut buf_full);
+                let midi = freq.and_then(|f| {
+                    let m = freq_to_midi(f);
+                    if (28..=67).contains(&m) { Some(m) } else { None }
+                });
+                (midi, conf)
             };
 
-            frames.push((time, midi, rms));
+            frames.push(PitchFrame { time, midi, rms, confidence });
             pos += HOP_SIZE;
         }
 
@@ -142,11 +147,11 @@ impl YinDetector {
 
     fn segment_at_onsets(
         &self,
-        frames: &[(f64, Option<u8>, f64)],
+        frames: &[PitchFrame],
         onsets: &[f64],
     ) -> Vec<MidiNote> {
         let frame_dur = HOP_SIZE as f64 / self.sample_rate;
-        let end_time = frames.last().map_or(0.0, |f| f.0 + frame_dur);
+        let end_time = frames.last().map_or(0.0, |f| f.time + frame_dur);
         let mut notes = Vec::new();
 
         for (idx, &onset_time) in onsets.iter().enumerate() {
@@ -156,10 +161,10 @@ impl YinDetector {
                 end_time
             };
 
-            let pitched: Vec<(u8, f64)> = frames
+            let pitched: Vec<(u8, f64, f64)> = frames
                 .iter()
-                .filter(|(t, _, _)| *t >= onset_time && *t < next_boundary)
-                .filter_map(|(_, midi, rms)| midi.map(|m| (m, *rms)))
+                .filter(|f| f.time >= onset_time && f.time < next_boundary)
+                .filter_map(|f| f.midi.map(|m| (m, f.rms, f.confidence)))
                 .collect();
 
             if pitched.is_empty() {
@@ -167,7 +172,7 @@ impl YinDetector {
             }
 
             let pitch = predominant_pitch(&pitched);
-            let peak_rms = pitched.iter().map(|(_, r)| *r).fold(0.0_f64, f64::max);
+            let peak_rms = pitched.iter().map(|(_, r, _)| *r).fold(0.0_f64, f64::max);
             let offset = next_boundary.min(end_time);
 
             if offset - onset_time >= MIN_NOTE_SECS {
@@ -197,7 +202,7 @@ impl YinDetector {
         ifft: &Arc<dyn rustfft::Fft<f64>>,
         buf_half: &mut [Complex<f64>],
         buf_full: &mut [Complex<f64>],
-    ) -> Option<f64> {
+    ) -> (Option<f64>, f64) {
         let n = frame.len();
         let half = n / 2;
         let fft_size = buf_half.len();
@@ -290,7 +295,7 @@ impl YinDetector {
                     })
                     .unwrap_or(self.min_lag);
                 if cmnd[t] > 0.5 {
-                    return None;
+                    return (None, 0.0);
                 }
                 t
             }
@@ -311,41 +316,41 @@ impl YinDetector {
             tau as f64
         };
 
-        Some(self.sample_rate / refined)
+        (Some(self.sample_rate / refined), (1.0 - cmnd[tau]).clamp(0.0, 1.0))
     }
 
-    fn segment_notes(&self, frames: &[(f64, Option<u8>, f64)]) -> Vec<MidiNote> {
+    fn segment_notes(&self, frames: &[PitchFrame]) -> Vec<MidiNote> {
         let mut notes = Vec::new();
         let mut current: Option<(u8, f64, f64)> = None;
         let frame_dur = HOP_SIZE as f64 / self.sample_rate;
 
-        for &(time, midi, rms) in frames {
-            match (current, midi) {
+        for frame in frames {
+            match (current, frame.midi) {
                 (Some((cp, onset, peak)), Some(m)) if cp == m => {
-                    current = Some((cp, onset, peak.max(rms)));
+                    current = Some((cp, onset, peak.max(frame.rms)));
                 }
                 (Some((cp, onset, peak)), next) => {
-                    let duration = time - onset;
+                    let duration = frame.time - onset;
                     if duration >= MIN_NOTE_SECS {
                         notes.push(MidiNote {
                             pitch: cp,
                             onset,
-                            offset: time,
+                            offset: frame.time,
                             velocity: rms_to_velocity(peak),
                             technique: None,
                         });
                     }
-                    current = next.map(|m| (m, time, rms));
+                    current = next.map(|m| (m, frame.time, frame.rms));
                 }
                 (None, Some(m)) => {
-                    current = Some((m, time, rms));
+                    current = Some((m, frame.time, frame.rms));
                 }
                 (None, None) => {}
             }
         }
 
         if let Some((cp, onset, peak)) = current {
-            let offset = frames.last().map_or(onset, |f| f.0 + frame_dur);
+            let offset = frames.last().map_or(onset, |f| f.time + frame_dur);
             if offset - onset >= MIN_NOTE_SECS {
                 notes.push(MidiNote {
                     pitch: cp,
@@ -363,9 +368,9 @@ impl YinDetector {
 
 // ── Onset segmentation helpers ───────────────────────────────────
 
-fn predominant_pitch(pitched: &[(u8, f64)]) -> u8 {
+fn predominant_pitch(pitched: &[(u8, f64, f64)]) -> u8 {
     let mut counts = std::collections::HashMap::new();
-    for &(p, _) in pitched {
+    for &(p, _, _) in pitched {
         *counts.entry(p).or_insert(0u32) += 1;
     }
     counts
@@ -377,7 +382,7 @@ fn predominant_pitch(pitched: &[(u8, f64)]) -> u8 {
 
 fn detect_slides(
     notes: &mut [MidiNote],
-    frames: &[(f64, Option<u8>, f64)],
+    frames: &[PitchFrame],
     _sample_rate: f64,
 ) {
     if notes.len() < 2 {
@@ -399,8 +404,8 @@ fn detect_slides(
 
         let transition_frames: Vec<u8> = frames
             .iter()
-            .filter(|(t, _, _)| *t >= transition_start && *t <= transition_end)
-            .filter_map(|(_, midi, _)| *midi)
+            .filter(|f| f.time >= transition_start && f.time <= transition_end)
+            .filter_map(|f| f.midi)
             .collect();
 
         if transition_frames.len() < 3 {
@@ -612,19 +617,19 @@ mod tests {
     fn slide_detection_marks_smooth_transition() {
         // This test verifies the detect_slides function directly
         use crate::midi::Technique;
-        let frames: Vec<(f64, Option<u8>, f64)> = vec![
+        let frames: Vec<PitchFrame> = vec![
             // Note 1 region: pitch 45 (A2)
-            (0.0, Some(45), 0.1),
-            (0.046, Some(45), 0.09),
-            (0.093, Some(45), 0.08),
-            (0.139, Some(45), 0.07),
+            PitchFrame { time: 0.0, midi: Some(45), rms: 0.1, confidence: 0.9 },
+            PitchFrame { time: 0.046, midi: Some(45), rms: 0.09, confidence: 0.9 },
+            PitchFrame { time: 0.093, midi: Some(45), rms: 0.08, confidence: 0.9 },
+            PitchFrame { time: 0.139, midi: Some(45), rms: 0.07, confidence: 0.9 },
             // Transition: pitch glides 45 -> 46 -> 47 -> 48
-            (0.186, Some(46), 0.06),
-            (0.232, Some(47), 0.05),
+            PitchFrame { time: 0.186, midi: Some(46), rms: 0.06, confidence: 0.8 },
+            PitchFrame { time: 0.232, midi: Some(47), rms: 0.05, confidence: 0.8 },
             // Note 2 region: pitch 48 (C3)
-            (0.279, Some(48), 0.05),
-            (0.325, Some(48), 0.05),
-            (0.372, Some(48), 0.04),
+            PitchFrame { time: 0.279, midi: Some(48), rms: 0.05, confidence: 0.9 },
+            PitchFrame { time: 0.325, midi: Some(48), rms: 0.05, confidence: 0.9 },
+            PitchFrame { time: 0.372, midi: Some(48), rms: 0.04, confidence: 0.9 },
         ];
 
         let mut notes = vec![
@@ -651,5 +656,17 @@ mod tests {
             Some(Technique::Slide),
             "second note should be detected as slide"
         );
+    }
+
+    #[test]
+    fn pitch_frame_has_confidence() {
+        let samples = sine_wave(110.0, 1.0, 44100.0);
+        let det = YinDetector::new(44100.0);
+        let frames = det.pitch_frames(&samples);
+        let pitched: Vec<_> = frames.iter().filter(|f| f.midi.is_some()).collect();
+        assert!(!pitched.is_empty());
+        for f in &pitched {
+            assert!(f.confidence > 0.5, "confidence {:.2} should be > 0.5 for clean sine", f.confidence);
+        }
     }
 }
