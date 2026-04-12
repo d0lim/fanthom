@@ -14,6 +14,7 @@ export interface AppState {
   optimized: boolean;
   bpm: number;
   startOffset: number;
+  playbackTime: number | null;
 }
 
 export const initialState: AppState = {
@@ -25,6 +26,7 @@ export const initialState: AppState = {
   optimized: true,
   bpm: 120,
   startOffset: 0,
+  playbackTime: null,
 };
 
 export type AppAction =
@@ -37,6 +39,7 @@ export type AppAction =
   | { type: "SET_OPTIMIZED"; value: boolean }
   | { type: "SET_BPM"; value: number }
   | { type: "SET_START_OFFSET"; value: number }
+  | { type: "SET_PLAYBACK_TIME"; value: number }
   | { type: "RESET" };
 
 export function appReducer(state: AppState, action: AppAction): AppState {
@@ -66,6 +69,8 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       return { ...state, bpm: action.value };
     case "SET_START_OFFSET":
       return { ...state, startOffset: action.value };
+    case "SET_PLAYBACK_TIME":
+      return { ...state, playbackTime: action.value };
     case "RESET":
       return initialState;
     default:

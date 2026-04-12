@@ -1,9 +1,10 @@
 import { useRef, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { useAppState } from "../state";
+import { useAppState, useAppDispatch } from "../state";
 
 export function AudioPlayer() {
   const state = useAppState();
+  const dispatch = useAppDispatch();
   const audioRef = useRef<HTMLAudioElement>(null);
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -18,6 +19,7 @@ export function AudioPlayer() {
     if (!audio) return;
     if (playing) {
       audio.pause();
+      dispatch({ type: "SET_PLAYBACK_TIME", value: -1 });
     } else {
       audio.play();
     }
@@ -26,7 +28,11 @@ export function AudioPlayer() {
 
   function handleTimeUpdate() {
     const audio = audioRef.current;
-    if (audio) setCurrentTime(audio.currentTime);
+    if (!audio) return;
+    setCurrentTime(audio.currentTime);
+    if (playing) {
+      dispatch({ type: "SET_PLAYBACK_TIME", value: audio.currentTime });
+    }
   }
 
   function handleLoadedMetadata() {
@@ -39,11 +45,13 @@ export function AudioPlayer() {
     if (audio) {
       audio.currentTime = parseFloat(e.target.value);
       setCurrentTime(audio.currentTime);
+      dispatch({ type: "SET_PLAYBACK_TIME", value: audio.currentTime });
     }
   }
 
   function handleEnded() {
     setPlaying(false);
+    dispatch({ type: "SET_PLAYBACK_TIME", value: -1 });
   }
 
   function formatTime(sec: number): string {

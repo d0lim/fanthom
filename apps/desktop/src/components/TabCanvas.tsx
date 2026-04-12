@@ -18,6 +18,7 @@ const ROW_GAP = 32;
 const NOTE_FONT = "bold 13px monospace";
 const LABEL_FONT = "11px monospace";
 const MEASURE_FONT = "10px monospace";
+const PLAYHEAD_COLOR = "#ef4444"; // red-500
 
 function getNoteColor(origin: NoteOrigin): string {
   if (origin === "Normal") return COLORS.Normal;
@@ -28,11 +29,25 @@ function getNoteColor(origin: NoteOrigin): string {
 
 export function TabCanvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const overlayRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const layoutRef = useRef<{
+    totalRows: number;
+    rowHeight: number;
+    rowStringHeight: number;
+    measuresPerRow: number;
+    secPerMeasure: number;
+    pixelsPerSecond: number;
+    pixelsPerMeasure: number;
+    canvasWidth: number;
+    canvasHeight: number;
+    startOffset: number;
+  } | null>(null);
   const state = useAppState();
   const tabSheet = state.tabSheet;
   const bpm = state.bpm;
   const startOffset = state.startOffset;
+  const playbackTime = state.playbackTime;
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -46,19 +61,16 @@ export function TabCanvas() {
     const dpr = window.devicePixelRatio || 1;
     const numStrings = STRING_LABELS.length;
 
-    // Measure layout
     const beatsPerMeasure = tabSheet.time_signature[0];
     const secPerBeat = 60.0 / bpm;
     const secPerMeasure = secPerBeat * beatsPerMeasure;
 
-    // Calculate how many measures fit per row
     const availableWidth = rect.width - LEFT_MARGIN - RIGHT_MARGIN;
     const minPixelsPerMeasure = 120;
     const measuresPerRow = Math.max(1, Math.floor(availableWidth / minPixelsPerMeasure));
     const pixelsPerMeasure = availableWidth / measuresPerRow;
     const pixelsPerSecond = pixelsPerMeasure / secPerMeasure;
 
-    // Find total duration
     const lastTime = tabSheet.notes.reduce(
       (max, n) => Math.max(max, n.onset + n.duration),
       0,
@@ -67,10 +79,16 @@ export function TabCanvas() {
     const totalMeasures = Math.ceil(totalDuration / secPerMeasure);
     const totalRows = Math.ceil(totalMeasures / measuresPerRow);
 
-    // Row height: strings + gap
     const rowStringHeight = (numStrings - 1) * LINE_HEIGHT;
     const rowHeight = rowStringHeight + ROW_GAP;
     const canvasHeight = TOP_MARGIN + totalRows * rowHeight + ROW_GAP;
+
+    // Save layout for overlay
+    layoutRef.current = {
+      totalRows, rowHeight, rowStringHeight, measuresPerRow,
+      secPerMeasure, pixelsPerSecond, pixelsPerMeasure,
+      canvasWidth: rect.width, canvasHeight, startOffset,
+    };
 
     // Set canvas size
     canvas.width = rect.width * dpr;
@@ -79,18 +97,24 @@ export function TabCanvas() {
     canvas.style.height = `${canvasHeight}px`;
     ctx.scale(dpr, dpr);
 
-    // Background
+    // Also size overlay
+    const overlay = overlayRef.current;
+    if (overlay) {
+      overlay.width = rect.width * dpr;
+      overlay.height = canvasHeight * dpr;
+      overlay.style.width = `${rect.width}px`;
+      overlay.style.height = `${canvasHeight}px`;
+    }
+
     ctx.fillStyle = "#09090b";
     ctx.fillRect(0, 0, rect.width, canvasHeight);
 
-    // Draw each row
     for (let row = 0; row < totalRows; row++) {
       const rowY = TOP_MARGIN + row * rowHeight;
       const rowStartMeasure = row * measuresPerRow;
       const rowStartTime = startOffset + rowStartMeasure * secPerMeasure;
       const rowEndTime = rowStartTime + measuresPerRow * secPerMeasure;
 
-      // Draw string lines
       ctx.strokeStyle = "#3f3f46";
       ctx.lineWidth = 1;
       for (let s = 0; s < numStrings; s++) {
@@ -101,7 +125,6 @@ export function TabCanvas() {
         ctx.stroke();
       }
 
-      // String labels
       ctx.fillStyle = "#71717a";
       ctx.font = LABEL_FONT;
       ctx.textAlign = "right";
@@ -111,7 +134,6 @@ export function TabCanvas() {
         ctx.fillText(STRING_LABELS[s], LEFT_MARGIN - 8, y);
       }
 
-      // Measure bars and numbers
       for (let m = 0; m <= measuresPerRow; m++) {
         const measureIdx = rowStartMeasure + m;
         if (measureIdx > totalMeasures) break;
@@ -124,7 +146,6 @@ export function TabCanvas() {
         ctx.lineTo(x, rowY + rowStringHeight);
         ctx.stroke();
 
-        // Measure number
         if (m < measuresPerRow && measureIdx < totalMeasures) {
           ctx.fillStyle = "#52525b";
           ctx.font = MEASURE_FONT;
@@ -133,7 +154,6 @@ export function TabCanvas() {
           ctx.fillText(`${measureIdx + 1}`, x + 3, rowY - 2);
         }
 
-        // Beat markers (thin dotted lines)
         if (m < measuresPerRow) {
           ctx.strokeStyle = "#27272a";
           ctx.lineWidth = 0.5;
@@ -149,7 +169,6 @@ export function TabCanvas() {
         }
       }
 
-      // Draw notes in this row
       ctx.font = NOTE_FONT;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
@@ -164,18 +183,76 @@ export function TabCanvas() {
         const textWidth = ctx.measureText(fretStr).width;
         const radius = Math.max(textWidth / 2 + 4, 10);
 
-        // Background circle to clear string line
         ctx.fillStyle = "#09090b";
         ctx.beginPath();
         ctx.arc(x, y, radius, 0, Math.PI * 2);
         ctx.fill();
 
-        // Fret number
         ctx.fillStyle = getNoteColor(note.origin);
         ctx.fillText(fretStr, x, y);
       }
     }
   }, [tabSheet, bpm, startOffset]);
+
+  // Draw playhead on overlay canvas
+  const drawPlayhead = useCallback((time: number) => {
+    const overlay = overlayRef.current;
+    const layout = layoutRef.current;
+    if (!overlay || !layout) return;
+
+    const dpr = window.devicePixelRatio || 1;
+    const ctx = overlay.getContext("2d");
+    if (!ctx) return;
+
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, overlay.width, overlay.height);
+    ctx.scale(dpr, dpr);
+
+    if (time < 0) return;
+
+    const elapsed = time - layout.startOffset;
+    if (elapsed < 0) return;
+
+    const measureIdx = elapsed / layout.secPerMeasure;
+    const row = Math.floor(measureIdx / layout.measuresPerRow);
+    if (row >= layout.totalRows) return;
+
+    const rowStartMeasure = row * layout.measuresPerRow;
+    const rowStartTime = layout.startOffset + rowStartMeasure * layout.secPerMeasure;
+    const relTime = time - rowStartTime;
+    const x = LEFT_MARGIN + relTime * layout.pixelsPerSecond;
+    const rowY = TOP_MARGIN + row * layout.rowHeight;
+
+    // Red playhead line
+    ctx.strokeStyle = PLAYHEAD_COLOR;
+    ctx.lineWidth = 2;
+    ctx.globalAlpha = 0.8;
+    ctx.beginPath();
+    ctx.moveTo(x, rowY - 4);
+    ctx.lineTo(x, rowY + layout.rowStringHeight + 4);
+    ctx.stroke();
+
+    // Small triangle at top
+    ctx.fillStyle = PLAYHEAD_COLOR;
+    ctx.beginPath();
+    ctx.moveTo(x, rowY - 4);
+    ctx.lineTo(x - 4, rowY - 10);
+    ctx.lineTo(x + 4, rowY - 10);
+    ctx.closePath();
+    ctx.fill();
+    ctx.globalAlpha = 1.0;
+
+    // Auto-scroll to keep playhead visible
+    const container = containerRef.current;
+    if (container) {
+      const headY = rowY + layout.rowHeight / 2;
+      const scrollTop = container.scrollTop;
+      const viewHeight = container.clientHeight;
+      if (headY < scrollTop || headY > scrollTop + viewHeight - 60) {
+        container.scrollTo({ top: Math.max(0, rowY - 40), behavior: "smooth" });
+      }
+    }
+  }, []);
 
   useEffect(() => {
     draw();
@@ -183,9 +260,19 @@ export function TabCanvas() {
     return () => window.removeEventListener("resize", draw);
   }, [draw]);
 
+  // Animate playhead
+  useEffect(() => {
+    if (playbackTime != null && playbackTime >= 0) {
+      drawPlayhead(playbackTime);
+    } else {
+      drawPlayhead(-1);
+    }
+  }, [playbackTime, drawPlayhead]);
+
   return (
-    <div ref={containerRef} className="w-full h-full overflow-y-auto overflow-x-hidden">
-      <canvas ref={canvasRef} />
+    <div ref={containerRef} className="w-full h-full overflow-y-auto overflow-x-hidden relative">
+      <canvas ref={canvasRef} className="block" />
+      <canvas ref={overlayRef} className="absolute top-0 left-0 pointer-events-none" />
     </div>
   );
 }
