@@ -19,6 +19,9 @@ const MIN_FREQ: f64 = 30.0;
 const MAX_FREQ: f64 = 500.0;
 const SILENCE_RMS: f64 = 0.005;
 const MIN_NOTE_SECS: f64 = 0.05;
+const ATTACK_SKIP_SECS: f64 = 0.06; // skip first 60ms after onset for pitch voting (overtone noise)
+const MERGE_RMS_DROP_RATIO: f64 = 0.5; // merge same-pitch notes if transition RMS > 50% of peak
+const ENERGY_WINDOW_SAMPLES: usize = 512; // ~12ms @ 44.1kHz — short-window RMS envelope
 
 #[derive(Clone, Copy, Debug)]
 struct PitchFrame {
@@ -152,7 +155,8 @@ impl YinDetector {
             return self.segment_notes(&frames);
         }
 
-        let mut notes = self.segment_at_onsets(&frames, &onsets);
+        let notes = self.segment_at_onsets(&frames, &onsets);
+        let mut notes = merge_sustained_notes(notes, samples, self.sample_rate);
         detect_slides(&mut notes, &frames, self.sample_rate);
         notes
     }
@@ -173,18 +177,37 @@ impl YinDetector {
                 end_time
             };
 
-            let pitched: Vec<(u8, f64, f64)> = frames
+            // Skip the attack phase (first 60ms) for pitch voting — overtones during
+            // pluck transient can bias YIN toward wrong octave. Peak RMS still uses full range.
+            let sustain_start = (onset_time + ATTACK_SKIP_SECS).min(next_boundary);
+            let sustain_pitched: Vec<(u8, f64, f64)> = frames
                 .iter()
-                .filter(|f| f.time >= onset_time && f.time < next_boundary)
+                .filter(|f| f.time >= sustain_start && f.time < next_boundary)
                 .filter_map(|f| f.midi.map(|m| (m, f.rms, f.confidence)))
                 .collect();
+
+            // Fallback to all frames if sustain phase has no pitched data (very short notes)
+            let pitched: Vec<(u8, f64, f64)> = if sustain_pitched.is_empty() {
+                frames
+                    .iter()
+                    .filter(|f| f.time >= onset_time && f.time < next_boundary)
+                    .filter_map(|f| f.midi.map(|m| (m, f.rms, f.confidence)))
+                    .collect()
+            } else {
+                sustain_pitched
+            };
 
             if pitched.is_empty() {
                 continue;
             }
 
             let pitch = predominant_pitch(&pitched);
-            let peak_rms = pitched.iter().map(|(_, r, _)| *r).fold(0.0_f64, f64::max);
+            // Peak RMS from ALL frames (including attack) for velocity
+            let peak_rms = frames
+                .iter()
+                .filter(|f| f.time >= onset_time && f.time < next_boundary)
+                .map(|f| f.rms)
+                .fold(0.0_f64, f64::max);
             let offset = next_boundary.min(end_time);
 
             if offset - onset_time >= MIN_NOTE_SECS {
@@ -380,6 +403,85 @@ impl YinDetector {
 
 // ── Onset segmentation helpers ───────────────────────────────────
 
+/// Post-processing: merge consecutive same-pitch notes that lack an energy drop
+/// between them. Real re-plucks show a clear RMS dip before the new attack; a
+/// "note" that continues the previous pitch without that dip is a false onset.
+fn merge_sustained_notes(
+    notes: Vec<MidiNote>,
+    samples: &[f32],
+    sample_rate: f64,
+) -> Vec<MidiNote> {
+    let mut merged: Vec<MidiNote> = Vec::new();
+    for note in notes {
+        if let Some(last) = merged.last_mut() {
+            if last.pitch == note.pitch {
+                let peak = short_window_peak_rms(
+                    samples,
+                    sample_rate,
+                    last.onset,
+                    last.offset,
+                );
+                // Check the boundary: last 30ms of previous note into first 30ms of current.
+                let trans_start = (last.offset - 0.03).max(last.onset);
+                let trans_end = (note.onset + 0.03).min(note.offset);
+                let min_rms =
+                    short_window_min_rms(samples, sample_rate, trans_start, trans_end);
+
+                if peak > 0.0 && min_rms > MERGE_RMS_DROP_RATIO * peak {
+                    // No significant drop → this is a sustain, not a re-pluck.
+                    last.offset = note.offset;
+                    last.velocity = last.velocity.max(note.velocity);
+                    continue;
+                }
+            }
+        }
+        merged.push(note);
+    }
+    merged
+}
+
+fn short_window_peak_rms(samples: &[f32], sr: f64, start: f64, end: f64) -> f64 {
+    let start_sample = (start * sr).max(0.0) as usize;
+    let end_sample = ((end * sr) as usize).min(samples.len());
+    if end_sample <= start_sample + ENERGY_WINDOW_SAMPLES {
+        return rms_energy(&samples[start_sample..end_sample.max(start_sample)]);
+    }
+    let hop = ENERGY_WINDOW_SAMPLES / 4;
+    let mut peak = 0.0_f64;
+    let mut pos = start_sample;
+    while pos + ENERGY_WINDOW_SAMPLES <= end_sample {
+        let rms = rms_energy(&samples[pos..pos + ENERGY_WINDOW_SAMPLES]);
+        if rms > peak {
+            peak = rms;
+        }
+        pos += hop;
+    }
+    peak
+}
+
+fn short_window_min_rms(samples: &[f32], sr: f64, start: f64, end: f64) -> f64 {
+    let start_sample = (start * sr).max(0.0) as usize;
+    let end_sample = ((end * sr) as usize).min(samples.len());
+    if end_sample <= start_sample + ENERGY_WINDOW_SAMPLES {
+        return rms_energy(&samples[start_sample..end_sample.max(start_sample)]);
+    }
+    let hop = ENERGY_WINDOW_SAMPLES / 4;
+    let mut min = f64::INFINITY;
+    let mut pos = start_sample;
+    while pos + ENERGY_WINDOW_SAMPLES <= end_sample {
+        let rms = rms_energy(&samples[pos..pos + ENERGY_WINDOW_SAMPLES]);
+        if rms < min {
+            min = rms;
+        }
+        pos += hop;
+    }
+    if min.is_infinite() {
+        0.0
+    } else {
+        min
+    }
+}
+
 fn predominant_pitch(pitched: &[(u8, f64, f64)]) -> u8 {
     let mut weights = std::collections::HashMap::new();
     for &(p, _, confidence) in pitched {
@@ -533,9 +635,9 @@ mod tests {
     #[test]
     fn two_notes_segmented() {
         let sr = 44100.0;
-        let a2 = sine_wave(110.0, 0.5, sr);
+        let a2 = plucked_note(110.0, 0.5, sr);
         let silence = vec![0.0_f32; (0.1 * sr) as usize];
-        let e2 = sine_wave(82.41, 0.5, sr);
+        let e2 = plucked_note(82.41, 0.5, sr);
 
         let mut samples = Vec::new();
         samples.extend_from_slice(&a2);
@@ -591,11 +693,12 @@ mod tests {
             .map(|i| {
                 let t = i as f64 / sr;
                 let env = (-t * 3.0).exp() as f32;
-                let attack = if t < 0.005 {
+                let attack = if t < 0.01 {
                     let click = (2.0 * PI * 200.0 * t).sin()
                         + (2.0 * PI * 800.0 * t).sin()
-                        + (2.0 * PI * 2000.0 * t).sin();
-                    click as f32 * (-t * 500.0).exp() as f32 * 0.3
+                        + (2.0 * PI * 2000.0 * t).sin()
+                        + (2.0 * PI * 4000.0 * t).sin();
+                    click as f32 * (-t * 300.0).exp() as f32 * 0.8
                 } else {
                     0.0
                 };

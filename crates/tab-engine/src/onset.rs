@@ -7,9 +7,9 @@ use std::f64::consts::PI;
 const ONSET_FRAME_SIZE: usize = 1024;
 const ONSET_HOP_SIZE: usize = 128; // ~2.9 ms — 2x precision (was 256)
 const ADAPTIVE_WINDOW: usize = 20; // scaled up with HOP_SIZE reduction (maintains ~58ms coverage)
-const FLUX_MULTIPLIER: f64 = 1.5;
+const FLUX_MULTIPLIER: f64 = 2.5;
 const FLUX_OFFSET: f64 = 0.007;
-const MIN_ONSET_GAP_SECS: f64 = 0.05;
+const MIN_ONSET_GAP_SECS: f64 = 0.12;
 
 /// Detect note onset times in an audio signal using spectral flux.
 /// Returns a sorted list of onset times in seconds.
@@ -120,11 +120,12 @@ mod tests {
             .map(|i| {
                 let t = i as f64 / sr;
                 let env = (-t * 3.0).exp() as f32;
-                let attack = if t < 0.005 {
+                let attack = if t < 0.01 {
                     let click = (2.0 * PI * 200.0 * t).sin()
                         + (2.0 * PI * 800.0 * t).sin()
-                        + (2.0 * PI * 2000.0 * t).sin();
-                    click as f32 * (-t * 500.0).exp() as f32 * 0.3
+                        + (2.0 * PI * 2000.0 * t).sin()
+                        + (2.0 * PI * 4000.0 * t).sin();
+                    click as f32 * (-t * 300.0).exp() as f32 * 0.8
                 } else {
                     0.0
                 };
