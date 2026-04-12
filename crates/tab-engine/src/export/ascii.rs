@@ -77,6 +77,7 @@ mod tests {
             onset,
             duration: 0.5,
             origin: NoteOrigin::Normal,
+            technique: None,
         }
     }
 

@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use crate::midi::Technique;
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum Tuning {
@@ -32,6 +33,8 @@ pub struct TabNote {
     pub onset: f64,
     pub duration: f64,
     pub origin: NoteOrigin,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub technique: Option<Technique>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -106,5 +109,30 @@ mod tests {
         assert!(candidates.is_empty());
         let candidates = pitch_to_candidates(68, Tuning::Standard4);
         assert!(candidates.is_empty());
+    }
+
+    #[test]
+    fn tab_note_serializes_technique() {
+        use crate::midi::Technique;
+        let note = TabNote {
+            string: 0, fret: 5, midi_pitch: 33,
+            onset: 0.0, duration: 0.5,
+            origin: NoteOrigin::Normal,
+            technique: Some(Technique::Slide),
+        };
+        let json = serde_json::to_string(&note).unwrap();
+        assert!(json.contains("\"technique\":\"Slide\""));
+    }
+
+    #[test]
+    fn tab_note_without_technique_omits_field() {
+        let note = TabNote {
+            string: 0, fret: 5, midi_pitch: 33,
+            onset: 0.0, duration: 0.5,
+            origin: NoteOrigin::Normal,
+            technique: None,
+        };
+        let json = serde_json::to_string(&note).unwrap();
+        assert!(!json.contains("technique"));
     }
 }

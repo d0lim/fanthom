@@ -36,6 +36,7 @@ pub fn toggle_optimization(
                 onset: n.onset,
                 duration: n.offset - n.onset,
                 origin: tab_engine::NoteOrigin::Normal,
+                technique: n.technique,
             }
         }).collect();
         Ok(TabSheet {
@@ -73,6 +74,7 @@ pub fn regenerate_tab(
                 onset: n.onset,
                 duration: n.offset - n.onset,
                 origin: tab_engine::NoteOrigin::Normal,
+                technique: n.technique,
             }
         }).collect();
         Ok(TabSheet {

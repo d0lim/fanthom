@@ -141,6 +141,7 @@ mod tests {
             midi_pitch: 0,
             onset, duration,
             origin: NoteOrigin::Normal,
+            technique: None,
         }
     }
 

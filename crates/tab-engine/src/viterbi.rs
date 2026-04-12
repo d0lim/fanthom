@@ -123,6 +123,7 @@ pub fn optimize(notes: &[MidiNote], tuning: Tuning, tempo: f64, time_sig: (u8, u
                 onset: note.onset,
                 duration: note.offset - note.onset,
                 origin: NoteOrigin::Optimized,
+                technique: note.technique,
             }
         })
         .collect();
