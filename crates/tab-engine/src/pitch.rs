@@ -5,6 +5,7 @@
 
 use crate::onset;
 use crate::MidiNote;
+use rayon::prelude::*;
 use rustfft::{num_complex::Complex, FftPlanner};
 use std::path::Path;
 use std::sync::Arc;
@@ -12,7 +13,7 @@ use std::sync::Arc;
 // ── Detection parameters ──────────────────────────────────────────
 
 const FRAME_SIZE: usize = 8192; // ~186 ms at 44 100 Hz — ≥3 periods of E1 (41 Hz)
-const HOP_SIZE: usize = 2048; // ~46 ms
+const HOP_SIZE: usize = 1024; // ~23 ms — 2x precision (was 2048)
 const YIN_THRESHOLD: f64 = 0.15;
 const MIN_FREQ: f64 = 30.0;
 const MAX_FREQ: f64 = 500.0;
@@ -97,39 +98,48 @@ impl YinDetector {
     }
 
     fn pitch_frames(&self, samples: &[f32]) -> Vec<PitchFrame> {
-        let fft_size = (FRAME_SIZE * 2).next_power_of_two(); // 8192
+        let fft_size = (FRAME_SIZE * 2).next_power_of_two();
         let mut planner = FftPlanner::<f64>::new();
         let fft = planner.plan_fft_forward(fft_size);
         let ifft = planner.plan_fft_inverse(fft_size);
 
-        // Reusable buffers (avoid per-frame allocation)
-        let mut buf_half = vec![Complex::new(0.0, 0.0); fft_size];
-        let mut buf_full = vec![Complex::new(0.0, 0.0); fft_size];
+        let num_frames = if samples.len() >= FRAME_SIZE {
+            (samples.len() - FRAME_SIZE) / HOP_SIZE + 1
+        } else {
+            return vec![];
+        };
 
-        let mut frames = Vec::new();
-        let mut pos = 0;
+        (0..num_frames)
+            .into_par_iter()
+            .map_init(
+                || {
+                    (
+                        vec![Complex::new(0.0, 0.0); fft_size],
+                        vec![Complex::new(0.0, 0.0); fft_size],
+                    )
+                },
+                |(buf_half, buf_full), i| {
+                    let pos = i * HOP_SIZE;
+                    let frame = &samples[pos..pos + FRAME_SIZE];
+                    let time = pos as f64 / self.sample_rate;
+                    let rms = rms_energy(frame);
 
-        while pos + FRAME_SIZE <= samples.len() {
-            let frame = &samples[pos..pos + FRAME_SIZE];
-            let time = pos as f64 / self.sample_rate;
-            let rms = rms_energy(frame);
+                    let (midi, confidence) = if rms < SILENCE_RMS {
+                        (None, 0.0)
+                    } else {
+                        let (freq, conf) =
+                            self.yin_pitch_fft(frame, &fft, &ifft, buf_half, buf_full);
+                        let midi = freq.and_then(|f| {
+                            let m = freq_to_midi(f);
+                            if (28..=67).contains(&m) { Some(m) } else { None }
+                        });
+                        (midi, conf)
+                    };
 
-            let (midi, confidence) = if rms < SILENCE_RMS {
-                (None, 0.0)
-            } else {
-                let (freq, conf) = self.yin_pitch_fft(frame, &fft, &ifft, &mut buf_half, &mut buf_full);
-                let midi = freq.and_then(|f| {
-                    let m = freq_to_midi(f);
-                    if (28..=67).contains(&m) { Some(m) } else { None }
-                });
-                (midi, conf)
-            };
-
-            frames.push(PitchFrame { time, midi, rms, confidence });
-            pos += HOP_SIZE;
-        }
-
-        frames
+                    PitchFrame { time, midi, rms, confidence }
+                },
+            )
+            .collect()
     }
 
     fn detect_with_onsets(&self, samples: &[f32]) -> Vec<MidiNote> {
