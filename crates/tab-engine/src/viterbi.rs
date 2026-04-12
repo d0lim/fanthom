@@ -84,10 +84,26 @@ pub fn optimize(notes: &[MidiNote], tuning: Tuning, tempo: f64, time_sig: (u8, u
             let mut best_cost = f64::INFINITY;
             let mut best_prev = 0;
             for (j, prev_c) in prev_candidates.iter().enumerate() {
+                // Slides must stay on the same string
+                if notes[i].technique == Some(crate::midi::Technique::Slide)
+                    && prev_c.string != curr_c.string
+                {
+                    continue;
+                }
                 let total = dp[i - 1][j].0 + transition_cost(prev_c, curr_c) + e_cost;
                 if total < best_cost {
                     best_cost = total;
                     best_prev = j;
+                }
+            }
+            // Fallback: if slide constraint made all paths invalid, relax it
+            if best_cost == f64::INFINITY {
+                for (j, prev_c) in prev_candidates.iter().enumerate() {
+                    let total = dp[i - 1][j].0 + transition_cost(prev_c, curr_c) + e_cost;
+                    if total < best_cost {
+                        best_cost = total;
+                        best_prev = j;
+                    }
                 }
             }
             curr_dp.push((best_cost, best_prev));
@@ -179,6 +195,20 @@ mod tests {
         let sheet = optimize(&notes, Tuning::Standard4, 120.0, (4, 4));
         assert_eq!(sheet.notes[0].string, 2);
         assert_eq!(sheet.notes[0].fret, 5);
+    }
+
+    #[test]
+    fn slide_notes_use_same_string() {
+        use crate::midi::Technique;
+        let notes = vec![
+            MidiNote { pitch: 33, onset: 0.0, offset: 0.5, velocity: 80, technique: None },
+            MidiNote { pitch: 35, onset: 0.5, offset: 1.0, velocity: 80, technique: Some(Technique::Slide) },
+        ];
+        let sheet = optimize(&notes, Tuning::Standard4, 120.0, (4, 4));
+        assert_eq!(
+            sheet.notes[0].string, sheet.notes[1].string,
+            "slide notes must be on the same string"
+        );
     }
 
     #[test]
