@@ -2,6 +2,42 @@
 node = "22"
 python = "3.11"
 rust = "1.88"
+"npm:pnpm" = "9"
 
 [env]
 PYTHONPATH = "./python/ai-pipeline"
+
+# ── Tasks ──────────────────────────────────────────────
+
+[tasks.setup]
+description = "Install all dependencies (Node, Python, Rust)"
+run = """
+pnpm install
+pip install -r python/ai-pipeline/requirements.txt
+cargo build --workspace
+"""
+
+[tasks.dev]
+description = "Start Tauri dev server"
+depends = ["setup"]
+run = "pnpm dev"
+
+[tasks.test]
+description = "Run all tests (Rust + Python + TypeScript)"
+run = """
+cargo test --workspace
+PYTHONPATH=python/ai-pipeline python -m pytest python/ai-pipeline/tests/ -v
+cd apps/desktop && pnpm exec tsc --noEmit
+"""
+
+[tasks."test:rust"]
+description = "Run Rust tests only"
+run = "cargo test --workspace"
+
+[tasks."test:python"]
+description = "Run Python tests only"
+run = "PYTHONPATH=python/ai-pipeline python -m pytest python/ai-pipeline/tests/ -v"
+
+[tasks."test:frontend"]
+description = "Run frontend typecheck only"
+run = "cd apps/desktop && pnpm exec tsc --noEmit"
