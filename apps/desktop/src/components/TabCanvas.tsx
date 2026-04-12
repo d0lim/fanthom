@@ -184,10 +184,15 @@ export function TabCanvas() {
         const textWidth = ctx.measureText(fretStr).width;
         const radius = Math.max(textWidth / 2 + 4, 10);
 
+        // Clamp position so notes don't get clipped at row edges
+        const xMin = LEFT_MARGIN + radius;
+        const xMax = rect.width - RIGHT_MARGIN - radius;
+        const drawX = Math.max(xMin, Math.min(x, xMax));
+
         // Draw background circle to clear string line
         ctx.fillStyle = "#09090b";
         ctx.beginPath();
-        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.arc(drawX, y, radius, 0, Math.PI * 2);
         ctx.fill();
 
         // Draw slide connector line if this is a slide note
@@ -205,15 +210,16 @@ export function TabCanvas() {
 
           if (prevNote) {
             const prevRelTime = prevNote.onset - rowStartTime;
-            const prevX = LEFT_MARGIN + prevRelTime * pixelsPerSecond;
+            const prevRawX = LEFT_MARGIN + prevRelTime * pixelsPerSecond;
+            const prevDrawX = Math.max(xMin, Math.min(prevRawX, xMax));
             const prevY = rowY + (numStrings - 1 - prevNote.string) * LINE_HEIGHT;
 
             // Draw diagonal slide line
             ctx.strokeStyle = COLORS.Slide;
             ctx.lineWidth = 1.5;
             ctx.beginPath();
-            ctx.moveTo(prevX + radius, prevY);
-            ctx.lineTo(x - radius, y);
+            ctx.moveTo(prevDrawX + radius, prevY);
+            ctx.lineTo(drawX - radius, y);
             ctx.stroke();
           }
 
@@ -223,7 +229,7 @@ export function TabCanvas() {
           ctx.fillStyle = getNoteColor(note.origin);
         }
 
-        ctx.fillText(fretStr, x, y);
+        ctx.fillText(fretStr, drawX, y);
       }
     }
   }, [tabSheet, bpm, startOffset]);
