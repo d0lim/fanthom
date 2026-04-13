@@ -1,27 +1,59 @@
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
+import * as Tone from "tone";
 import { useAppState, useAppDispatch } from "../state";
 
 export function AudioPlayer() {
   const state = useAppState();
   const dispatch = useAppDispatch();
   const audioRef = useRef<HTMLAudioElement>(null);
+  const pitchShiftRef = useRef<Tone.PitchShift | null>(null);
+  const setupDoneRef = useRef(false);
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+
+  useEffect(() => {
+    if (pitchShiftRef.current) {
+      pitchShiftRef.current.pitch = state.transpose;
+    }
+  }, [state.transpose]);
+
+  useEffect(() => {
+    return () => {
+      pitchShiftRef.current?.dispose();
+      pitchShiftRef.current = null;
+      setupDoneRef.current = false;
+    };
+  }, []);
 
   if (!state.bassPath) return null;
 
   const audioSrc = convertFileSrc(state.bassPath);
 
-  function togglePlay() {
+  async function ensureAudioGraph() {
+    if (setupDoneRef.current) return;
     const audio = audioRef.current;
     if (!audio) return;
+    await Tone.start();
+    const ctx = Tone.getContext().rawContext as AudioContext;
+    const source = ctx.createMediaElementSource(audio);
+    const pitchShift = new Tone.PitchShift({ pitch: state.transpose });
+    Tone.connect(source, pitchShift);
+    pitchShift.toDestination();
+    pitchShiftRef.current = pitchShift;
+    setupDoneRef.current = true;
+  }
+
+  async function togglePlay() {
+    const audio = audioRef.current;
+    if (!audio) return;
+    await ensureAudioGraph();
     if (playing) {
       audio.pause();
       dispatch({ type: "SET_PLAYBACK_TIME", value: -1 });
     } else {
-      audio.play();
+      await audio.play();
     }
     setPlaying(!playing);
   }

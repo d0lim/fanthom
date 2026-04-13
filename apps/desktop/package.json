@@ -13,7 +13,8 @@
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-shell": "^2",
     "react": "^19",
-    "react-dom": "^19"
+    "react-dom": "^19",
+    "tone": "^15.1.22"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4",
