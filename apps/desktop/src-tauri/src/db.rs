@@ -51,14 +51,6 @@ pub fn insert_tab(conn: &Connection, id: &str, song_id: &str, tuning: &str, tran
     Ok(())
 }
 
-pub fn get_tab_data(conn: &Connection, tab_id: &str) -> Result<Vec<u8>> {
-    conn.query_row(
-        "SELECT tab_data FROM tabs WHERE id = ?1",
-        params![tab_id],
-        |row| row.get(0),
-    )
-}
-
 fn chrono_now() -> String {
     let duration = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -90,7 +82,11 @@ mod tests {
         insert_song(&conn, "s1", "Song", None, None, None).unwrap();
         let tab_data = vec![1u8, 2, 3, 4, 5];
         insert_tab(&conn, "t1", "s1", "standard4", 0, &tab_data).unwrap();
-        let retrieved = get_tab_data(&conn, "t1").unwrap();
+        let retrieved: Vec<u8> = conn.query_row(
+            "SELECT tab_data FROM tabs WHERE id = 't1'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
         assert_eq!(retrieved, tab_data);
     }
 }
