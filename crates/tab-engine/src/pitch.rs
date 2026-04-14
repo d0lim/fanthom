@@ -310,7 +310,7 @@ impl YinDetector {
         let mut tau = self.min_lag;
         while tau <= max_lag {
             if cmnd[tau] < YIN_THRESHOLD {
-                while tau + 1 <= max_lag && cmnd[tau + 1] < cmnd[tau] {
+                while tau < max_lag && cmnd[tau + 1] < cmnd[tau] {
                     tau += 1;
                 }
                 best = Some(tau);

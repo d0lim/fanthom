@@ -18,7 +18,7 @@ pub fn export(sheet: &TabSheet) -> String {
     let last_note = sheet.notes.iter().map(|n| n.onset + n.duration).fold(0.0f64, f64::max);
     let beat_duration = 60.0 / sheet.tempo;
     let total_beats = (last_note / beat_duration).ceil() as usize;
-    let total_measures = ((total_beats + BEATS_PER_MEASURE - 1) / BEATS_PER_MEASURE).max(1);
+    let total_measures = total_beats.div_ceil(BEATS_PER_MEASURE).max(1);
     let total_chars = total_measures * CHARS_PER_MEASURE;
 
     let mut grid: Vec<Vec<String>> = vec![vec!["-".to_string(); total_chars]; num_strings];
@@ -53,8 +53,8 @@ pub fn export(sheet: &TabSheet) -> String {
         for s in (0..num_strings).rev() {
             output.push_str(string_labels[s]);
             output.push('|');
-            for c in start_char..end_char {
-                output.push_str(&grid[s][c]);
+            for (c, cell) in grid[s].iter().enumerate().take(end_char).skip(start_char) {
+                output.push_str(cell);
                 if (c + 1) % CHARS_PER_MEASURE == 0 && c + 1 < end_char {
                     output.push('|');
                 }
